@@ -112,6 +112,7 @@ async fn run_gate(
     master_client_fd: i32,
     active: Arc<AtomicBool>,
 ) -> Result<()> {
+    worker::register_signals();
     if context_data.development {
         warn!("RUNNING IN DEVELOPMENT MODE");
     }

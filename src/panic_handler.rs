@@ -7,19 +7,23 @@ use parking_lot::Mutex;
 static CHILD_PIDS: LazyLock<Mutex<BTreeSet<libc::pid_t>>> =
     LazyLock::new(|| Mutex::new(BTreeSet::new()));
 
+pub fn term_childs() {
+    signal_childs(libc::SIGTERM);
+}
+
+fn signal_childs(signal: libc::c_int) {
+    for &pid in CHILD_PIDS.lock().iter() {
+        unsafe {
+            libc::kill(pid, signal);
+        }
+    }
+}
+
 fn panic_handler(info: &std::panic::PanicHookInfo) {
     eprintln!("Panic occurred: {}", info);
-    for &pid in CHILD_PIDS.lock().iter() {
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
-    }
+    signal_childs(libc::SIGTERM);
     std::thread::sleep(Duration::from_secs(2));
-    for &pid in CHILD_PIDS.lock().iter() {
-        unsafe {
-            libc::kill(pid, libc::SIGKILL);
-        }
-    }
+    signal_childs(libc::SIGKILL);
     std::process::exit(5);
 }
 

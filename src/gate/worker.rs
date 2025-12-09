@@ -24,6 +24,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::{
     net::{TcpListener, UnixStream},
+    signal::unix::{SignalKind, signal},
     task::JoinHandle,
 };
 use tracing::{debug, info};
@@ -372,4 +373,26 @@ pub async fn prepare_privileged(
             .replace(Static::new(&auth_config.www_root));
     }
     Ok((context_data, listeners))
+}
+
+pub fn register_signals() {
+    tokio::spawn(async move {
+        let mut sig_hup = signal(SignalKind::hangup()).unwrap();
+        let mut sig_int = signal(SignalKind::interrupt()).unwrap();
+        let mut sig_term = signal(SignalKind::terminate()).unwrap();
+        loop {
+            tokio::select! {
+                _ = sig_hup.recv() => {
+                }
+
+                _ = sig_int.recv() => {
+                }
+
+                _ = sig_term.recv() => {
+                    info!("Shutting down");
+                    std::process::exit(0);
+                }
+            }
+        }
+    });
 }

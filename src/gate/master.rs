@@ -1,4 +1,12 @@
-use std::{net::IpAddr, os::fd::FromRawFd as _, sync::Arc, time::Duration};
+use std::{
+    net::IpAddr,
+    os::fd::FromRawFd as _,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use crate::{
     Result,
@@ -13,7 +21,11 @@ use busrt::{
 };
 use serde::Deserialize;
 use serde_json::{Value, to_value};
-use tokio::{net::UnixStream, sync::Mutex};
+use tokio::{
+    net::UnixStream,
+    signal::unix::{SignalKind, signal},
+    sync::Mutex,
+};
 use tracing::{debug, error, warn};
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -495,6 +507,38 @@ impl RpcHandlers for MasterHandlers {
     }
 }
 
+async fn terminate(active: Arc<AtomicBool>) {
+    if !active.load(Ordering::Relaxed) {
+        return;
+    }
+    active.store(false, Ordering::Relaxed);
+    crate::panic_handler::term_childs();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    std::process::exit(0);
+}
+
+fn register_signals(active: Arc<AtomicBool>) {
+    tokio::spawn(async move {
+        let mut sig_hup = signal(SignalKind::hangup()).unwrap();
+        let mut sig_int = signal(SignalKind::interrupt()).unwrap();
+        let mut sig_term = signal(SignalKind::terminate()).unwrap();
+        loop {
+            tokio::select! {
+                _ = sig_hup.recv() => {
+                }
+
+                _ = sig_int.recv() => {
+                    terminate(active.clone()).await;
+                }
+
+                _ = sig_term.recv() => {
+                    terminate(active.clone()).await;
+                }
+            }
+        }
+    });
+}
+
 async fn run_master_api_impl(
     fd: i32,
     child_pid: libc::pid_t,
@@ -502,6 +546,8 @@ async fn run_master_api_impl(
     virtual_app_map: Arc<VAppMap>,
     primary_system_host: Option<String>,
 ) -> Result<()> {
+    let active = Arc::new(AtomicBool::new(true));
+    register_signals(active.clone());
     let storage = storage::create(config.db.as_ref()).await?;
     storage.init().await?;
     storage
@@ -585,7 +631,10 @@ async fn run_master_api_impl(
     debug!("master: API server started");
     tokio::time::sleep(Duration::from_secs(2)).await;
     loop {
-        assert!(process_alive_nondefunct(child_pid), "worker died");
+        assert!(
+            process_alive_nondefunct(child_pid) || !active.load(Ordering::Relaxed),
+            "worker died"
+        );
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
