@@ -1,3 +1,5 @@
+VERSION := `grep ^version Cargo.toml|cut -d\" -f2`
+
 all:
   cargo run --bin gateryx-server -F server --release -- -c ./t/config.toml
 
@@ -14,6 +16,8 @@ build-x86_64-unknown-linux-gnu:
 build-aarch64-unknown-linux-gnu:
     CARGO_TARGET_DIR="./target-aarch64" \
     cross build --target aarch64-unknown-linux-gnu --release -F server
+
+deb: deb-amd64 deb-arm64
 
 deb-amd64: build-x86_64-unknown-linux-gnu pack-deb-amd64
 
@@ -32,6 +36,32 @@ system-web:
   cd system && npm i && npm run build
 
 pub-lab: build-x86_64-unknown-linux-gnu copy-lab
+
+pub: deb-amd64 deb-arm64 pub-deb docker pub-docker
+
+docker:
+  cd docker && rm -rf _build && mkdir _build
+  cd docker && cp ../make-deb/gateryx-server-{{ VERSION }}-arm64.deb ./_build/gateryx-server-arm64.deb
+  cd docker && cp ../make-deb/gateryx-client-{{ VERSION }}-arm64.deb ./_build/gateryx-client-arm64.deb
+  cd docker && cp ../make-deb/gateryx-server-{{ VERSION }}-amd64.deb ./_build/gateryx-server-amd64.deb
+  cd docker && cp ../make-deb/gateryx-client-{{ VERSION }}-amd64.deb ./_build/gateryx-client-amd64.deb
+  cd docker && docker build --pull --no-cache -t bmauto/gateryx-arm64:{{ VERSION }} -f ./Dockerfile.arm64 .
+  cd docker && docker build --pull --no-cache -t bmauto/gateryx:{{ VERSION }} -f ./Dockerfile.amd64 .
+  docker tag bmauto/gateryx-arm64:{{ VERSION }} bmauto/gateryx-arm64:latest
+  docker tag bmauto/gateryx:{{ VERSION }} bmauto/gateryx:latest
+
+pub-docker:
+  docker push bmauto/gateryx-arm64:{{ VERSION }}
+  docker push bmauto/gateryx-arm64:latest
+  docker push bmauto/gateryx:{{ VERSION }}
+  docker push bmauto/gateryx:latest
+
+pub-deb:
+  cd ~/src/apt/repo && reprepro includedeb stable ~/src/gateryx/make-deb/gateryx-client-{{ VERSION }}-arm64.deb
+  cd ~/src/apt/repo && reprepro includedeb stable ~/src/gateryx/make-deb/gateryx-server-{{ VERSION }}-arm64.deb
+  cd ~/src/apt/repo && reprepro includedeb stable ~/src/gateryx/make-deb/gateryx-client-{{ VERSION }}-amd64.deb
+  cd ~/src/apt/repo && reprepro includedeb stable ~/src/gateryx/make-deb/gateryx-server-{{ VERSION }}-amd64.deb
+  cd ~/src/apt/repo && just pub
 
 copy-lab:
   scp ./target-x86_64/x86_64-unknown-linux-gnu/release/gateryx gateryx-lab:/usr/local/bin/gateryx
