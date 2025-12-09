@@ -1,0 +1,22 @@
+#!/bin/sh
+
+if [ "$1" = "configure" ] && [ -z "$2" ]; then
+
+if [ ! -f /etc/gateryx/client.toml ]; then
+  cp /etc/gateryx/client.toml.default /etc/gateryx/client.toml
+  chmod 600 /etc/gateryx/client.toml
+fi
+
+cat << EOF
+Gateryx client installed
+
+Client configuration: /etc/gateryx/client.toml
+
+Put 'admin.pem' file in the same directory as 'client.toml' to enable
+admin features. Ensure that 'admin.pem' is readable only by root.
+
+If the server will be installed on the same machine, the client configuration
+can be deleted.
+
+EOF
+fi

@@ -1,0 +1,92 @@
+[auth]
+# Authenticator configuration
+# Note: there can be only one authenticator configured at a time
+
+# Basic authenticator using htpasswd file
+# use htpasswd -B to create bcrypt hashed passwords
+#authenticator = { kind = "htpasswd", params = { path = "htpasswd" } }
+
+# Database authenticator (uses server database to store user accounts)
+# uses server database to store user accounts
+# WARNING: it is recommended to raise the minimum password length and complexity
+# requirements when running in production
+authenticator = { kind = "db", params = { policy = { min_length = 6, require_uppercase = false, require_lowercase = false, require_digit = false, require_special = false } } }
+
+# LDAP authenticator
+#
+# supported providers:
+# * "msad" - Microsoft Active Directory
+# * "authentik" - Authentik LDAP server
+#
+# other providers are treated as generic LDAP (RFC 4510), specify as "generic" or omit the provider parameter
+# warning: for generic LDAP servers the authenticator does not check if the user account is disabled or locked
+#authenticator = { kind = "ldap", params = { path = "ou=users,dc=domain,dc=com", service_user = "service", service_password = "secret", url = "ldap://somehost:389", provider = "msad" } }
+
+# Breakin protection configuration
+#
+# * max_records - maximum number of remote clients to track
+# * window - time window in seconds
+# * ip_score - score to add for each failed attempt from the same IP address
+# * user_score - score to add for each failed attempt for the same username
+# * captcha_threshold - score threshold to require captcha verification
+breakin_protection = { max_records = 10000, window = 600, ip_score = 1, user_score = 1, captcha_threshold = 3 }
+
+# Passkeys
+#
+# * max_auth_challenges - maximum number of allowed authentication challenges per time
+# * max_reg_challenges - maximum number of allowed registration challenges per time
+# * timeout - challenge validity time in seconds
+# * max_auth_callenges_per_ip - maximum number of allowed authentication challenges per IP address
+# * check_login_present - require the selected authenticator to confirm that the user exists (default: true)
+passkeys = { max_auth_challenges = 100, max_reg_challenges = 10, timeout = 60 }
+
+# key_file: PKCS#8 private key in PEM format, eg. openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out tokens.pem
+# expire: token expiration time in seconds since the token was issued
+# domain: token validation for subdomains of the specified domain, also used as rp_id for passkeys
+tokens = { key_file = "tokens.pem", expire = 604800, domain = "domain.local" }
+
+# authentication form web
+www_root = "/var/gateryx/www/auth"
+
+[[listener]]
+bind = "0.0.0.0:80"
+max_clients = 100
+max_workers = 500
+app = "plain"
+
+[[listener]]
+bind = "0.0.0.0:443"
+max_clients = 100
+max_workers = 500
+tls = { cert = "selfsigned.crt", key = "selfsigned.pem" }
+http2 = true
+
+[server]
+http_log =  "/var/gateryx/log/access.log"
+# number of master threads (responsible for logging and IDP)
+master_threads = 1
+# number of worker threads (responsible for processing web requests)
+worker_threads = 1
+max_body_size = 20000000
+timeout = 5
+user = "gateryx"
+
+#[websocket_default]
+#read_buffer = 16384
+#write_buffer = 16384
+#max_message_size = 40485760
+#max_frame_size = 10485760
+
+# only SQLite is supported currently, PostgreSQL suport is coming very soon
+[db]
+uri = "sqlite:///var/gateryx/db/gateryx.db"
+pool_size = 10
+timeout = 5
+
+[admin]
+# key_file: PKCS#8 private key in PEM format, eg. openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out admin.pem
+key_file = "admin.pem"
+# allowed hosts/networks (ip addresses only)
+allow = ["127.0.0.1/32"]
+# max time difference in seconds between server and client for admin requests
+#max_time_diff = 300

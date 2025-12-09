@@ -1,0 +1,16 @@
+[Unit]
+Description=Gateryx
+After=network.target
+
+[Service]
+LimitCORE=0
+ProtectSystem=full
+NoNewPrivileges=yes
+Type=simple
+ExecStart=/usr/sbin/gateryx-server
+PIDFile=/run/gateryx.pid
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

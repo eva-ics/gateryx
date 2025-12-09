@@ -1,0 +1,76 @@
+@use "mixin" as *;
+
+$body-bg-color: #111;
+$main-text-color: #eee;
+$secondary-text-color: #d0d0d0;
+$connection-color: #0085ff;
+$border-color: #373737;
+$cards-bg-color: #191d22;
+$table-header-gb: #0b1c3b;
+$main-blue-color: #0085ff;
+$secondary-blue-color: #0a214f;
+$menu-hover-color: #555;
+$nav-menu-bg-color: #0a214f;
+
+body {
+    font-family: "Verdana", sans-serif;
+    background-color: $body-bg-color;
+    color: $main-text-color;
+    overflow-x: hidden;
+    overscroll-behavior: auto;
+}
+
+button {
+    cursor: pointer;
+}
+
+.root-container {
+    width: 100%;
+    margin: 0 auto;
+    padding-bottom: 40px;
+    @include media(desktop) {
+        padding-bottom: 0;
+    }
+}
+
+div.eva.login.logo {
+    &:before {
+        content: url("/.gateryx/auth/icon.svg");
+    }
+}
+
+div.eva.login.progress {
+    width: 50px;
+    height: 50px;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    color: transparent;
+    transform: translate(-50%, -50%);
+    background-color: #1144a9;
+    box-shadow: 1em 0 0 currentcolor;
+    border-radius: 50%;
+    animation: loader 1s ease-in-out infinite alternate;
+
+    @keyframes loader {
+        0% {
+            opacity: 0.1;
+            transform: rotate(0deg) scale(0.5);
+        }
+
+        100% {
+            opacity: 1;
+            transform: rotate(360deg) scale(1.2);
+        }
+    }
+}
+
+div.eva.login.header {
+    &:before {
+        content: "Gateryx Authentication";
+    }
+}
+
+div.eva.login.container {
+  height: 100vh;
+}

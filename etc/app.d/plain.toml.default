@@ -1,0 +1,12 @@
+# Used to redirect plain HTTP traffic to HTTPS ports
+
+url = "gateryx://plain"
+
+# A folder to host files via plain HTTP (usually .well-known folder only for
+# ACME challenges)
+remote = "/var/gateryx/www/plain"
+
+# Override redirection port
+#[settings]
+#target_port = 8443
+

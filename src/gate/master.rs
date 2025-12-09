@@ -1,0 +1,612 @@
+use std::{net::IpAddr, os::fd::FromRawFd as _, sync::Arc, time::Duration};
+
+use crate::{
+    Result,
+    admin::TransferredRequest,
+    passkeys::{Base64UrlSafeData, PublicKeyCredential, RegisterPublicKeyCredential},
+    rpc::{RpcRequest as JsonRpcRequest, RpcResponse as JsonRpcResponse},
+};
+use busrt::{
+    async_trait,
+    broker::Broker,
+    rpc::{RpcClient, RpcError, RpcEvent, RpcHandlers, RpcResult},
+};
+use serde::Deserialize;
+use serde_json::{Value, to_value};
+use tokio::{net::UnixStream, sync::Mutex};
+use tracing::{debug, error, warn};
+use uuid::Uuid;
+use zeroize::Zeroizing;
+
+use crate::{
+    Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, is_developent_mode,
+    logger::Logger,
+    passkeys,
+    storage::{self, Storage},
+    tokens::{self, ClaimsView},
+};
+
+use super::{AuthPayload, AuthResponse, ChangePasswordPayload, RpcEventExt, pack, pack_json};
+
+const CLEANUP_WORKER_INTERVAL: Duration = Duration::from_secs(60);
+
+struct Context {
+    admin_auth: Option<admin::Auth>,
+    authenticator: Option<Box<dyn authenticator::Authenticator>>,
+    bp: Option<Arc<bp::BreakinProtection>>,
+    passkey_factory: Option<passkeys::Factory>,
+    logger: Option<Mutex<Logger>>,
+    meta_logger: Option<Mutex<Logger>>,
+    token_factory: Option<tokens::Factory>,
+    token_domain: Option<String>,
+    token_domain_dot_prefixed: Option<String>,
+    storage: Arc<dyn Storage>,
+    development: bool,
+}
+
+impl Context {
+    fn report_auth_success(&self, ip_address: IpAddr, username: &str) {
+        if let Some(bp_engine) = &self.bp {
+            bp_engine.report_success(ip_address, username);
+        }
+    }
+    fn report_auth_failed(&self, ip_address: IpAddr, username: &str) {
+        if let Some(bp_engine) = &self.bp {
+            bp_engine.report_failure(ip_address, username);
+        }
+    }
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+pub fn process_alive_nondefunct(pid: libc::pid_t) -> bool {
+    use libproc::bsd_info::BSDInfo;
+    use libproc::libproc::proc_pid;
+    if let Ok(info) = proc_pid::pidinfo::<BSDInfo>(pid, 0) {
+        // pbi_status values:
+        // SIDL = 1, SRUN = 2, SSLEEP = 3, SSTOP = 4, SZOMB = 5
+        info.pbi_status != 5 // 5 = SZOMB
+    } else {
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn process_alive_nondefunct(pid: libc::pid_t) -> bool {
+    let f = std::fs::read_to_string(format!("/proc/{}/stat", pid));
+    if let Ok(content) = f {
+        let parts: Vec<&str> = content.split_whitespace().collect();
+        if parts.len() > 2 {
+            let state = parts[2];
+            state != "Z" // Z = zombie
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}
+
+struct MasterHandlers {
+    context: Context,
+}
+
+impl MasterHandlers {
+    async fn authenticate_passkey(
+        &self,
+        challenge: Base64UrlSafeData,
+        auth: PublicKeyCredential,
+        remote_ip: IpAddr,
+    ) -> Result<AuthResponse> {
+        let Some(ref token_factory) = self.context.token_factory else {
+            return Ok(AuthResponse::AuthNotEnabled);
+        };
+        let Some(ref passkey_factory) = self.context.passkey_factory else {
+            return Ok(AuthResponse::AuthNotEnabled);
+        };
+        let user = passkey_factory
+            .finish_authentication(&challenge, auth, &*self.context.storage)
+            .await?;
+        if passkey_factory.need_check_login_present()
+            && let Some(ref auth) = self.context.authenticator
+            && !auth.present(&user).await
+        {
+            return Ok(AuthResponse::InvalidCredentials(None));
+        }
+        self.context.report_auth_success(remote_ip, &user);
+        let (token_str, exp) = token_factory.issue(&user)?;
+        Ok(AuthResponse::Success((token_str, user, exp)))
+    }
+    async fn authenticate(&self, p: AuthPayload, remote_ip: IpAddr) -> Result<AuthResponse> {
+        macro_rules! maybe_need_captcha {
+            ($success: expr) => {
+                if let Some(ref bp) = self.context.bp {
+                    if let Some(captcha_id) = bp.need_captcha(remote_ip, &p.user)? {
+                        if $success {
+                            return Ok(AuthResponse::CaptchaRequired(captcha_id.to_string()));
+                        }
+                        return Ok(AuthResponse::InvalidCredentials(Some(
+                            captcha_id.to_string(),
+                        )));
+                    }
+                };
+            };
+        }
+
+        let Some(ref factory) = self.context.token_factory else {
+            return Ok(AuthResponse::AuthNotEnabled);
+        };
+        let Some(ref auth) = self.context.authenticator else {
+            return Ok(AuthResponse::AuthNotEnabled);
+        };
+        match auth.verify(&p.user, &p.password).await {
+            crate::authenticator::AuthResult::Success => {
+                if !self.verify_captcha(
+                    p.captcha_id.as_deref(),
+                    p.captcha_str.as_deref(),
+                    remote_ip,
+                )? {
+                    maybe_need_captcha!(true);
+                }
+                self.context.report_auth_success(remote_ip, &p.user);
+                let (token_str, exp) = factory.issue(&p.user)?;
+                Ok(AuthResponse::Success((token_str, p.user.clone(), exp)))
+            }
+            crate::authenticator::AuthResult::Failure => {
+                self.context.report_auth_failed(remote_ip, &p.user);
+                warn!(ip = %remote_ip, user = %p.user, "Failed login attempt");
+                maybe_need_captcha!(false);
+                Ok(AuthResponse::InvalidCredentials(None))
+            }
+        }
+    }
+    fn verify_captcha(
+        &self,
+        captcha_id: Option<&str>,
+        captcha_str: Option<&str>,
+        remote_ip: IpAddr,
+    ) -> Result<bool> {
+        let Some(ref bp) = self.context.bp else {
+            return Ok(true);
+        };
+        let Some(captcha_id) = captcha_id else {
+            return Ok(false);
+        };
+        if captcha_id.is_empty() {
+            return Ok(false);
+        }
+        let Some(captcha_str) = captcha_str else {
+            return Ok(false);
+        };
+        let Ok(captcha_id) = uuid::Uuid::parse_str(captcha_id) else {
+            return Ok(false);
+        };
+        if !bp.verify_captcha(captcha_id, remote_ip, captcha_str)? {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+    async fn get_user(&self, token_str: &str) -> Result<String> {
+        if self.context.development {
+            return Ok(DEVELOPER_USER.to_string());
+        }
+        let Some(ref token_factory) = self.context.token_factory else {
+            return Err(Error::failed("Authentication is not enabled"));
+        };
+        match token_factory
+            .validate(token_str.to_string(), self.context.storage.as_ref())
+            .await
+        {
+            tokens::ValidationResponse::Valid { claims: c, .. } => Ok(c.sub),
+            tokens::ValidationResponse::Invalid => Err(Error::access("Invalid token")),
+        }
+    }
+    async fn handle_admin_rpc(
+        &self,
+        admin_request: TransferredRequest,
+        remote_ip: IpAddr,
+    ) -> Result<Value> {
+        let Some(ref auth) = self.context.admin_auth else {
+            return Err(Error::access("Admin API is not enabled"));
+        };
+        let body = auth
+            .parse_transferred_request(admin_request, remote_ip)
+            .await?;
+        let rpc_request = match JsonRpcRequest::try_from(&body[..]) {
+            Ok(r) => r,
+            Err(e) => {
+                error!(ip = %remote_ip, error = %e, "Failed to parse RPC request");
+                let response = JsonRpcResponse::new_error(Value::Null, e);
+                return Ok(to_value(response)?);
+            }
+        };
+        let JsonRpcRequest {
+            id, method, params, ..
+        } = rpc_request;
+        match self.jsonrpc_admin(&method, params, remote_ip).await {
+            Ok(response) => Ok(to_value(JsonRpcResponse::new_result(id, response))?),
+            Err(e) => Ok(to_value(JsonRpcResponse::new_error(id, e))?),
+        }
+    }
+    #[allow(clippy::too_many_lines)]
+    async fn jsonrpc_admin(
+        &self,
+        method: &str,
+        params: Value,
+        _remote_ip: IpAddr,
+    ) -> Result<Value> {
+        match method {
+            "admin.test" => Ok(serde_json::json!({"ok": true})),
+            "admin.revoke_tokens" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    user: String,
+                    expires: Option<u64>,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                let Some(ref factory) = self.context.token_factory else {
+                    return Err(Error::failed("Authentication not enabled"));
+                };
+                let expires = p.expires.unwrap_or(factory.expiration_seconds());
+                self.context
+                    .storage
+                    .revoke_tokens(&p.user, Duration::from_secs(expires))
+                    .await?;
+                Ok(Value::Null)
+            }
+            "admin.user.create" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    user: String,
+                    password: String,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                if let Some(ref auth) = self.context.authenticator {
+                    auth.add(&p.user, &p.password).await?;
+                    Ok(Value::Null)
+                } else {
+                    Err(Error::failed("Authenticator not configured"))
+                }
+            }
+            "admin.user.delete" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    user: String,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                if let Some(ref auth) = self.context.authenticator {
+                    auth.remove(&p.user).await?;
+                    if let Some(ref factory) = self.context.token_factory {
+                        self.context
+                            .storage
+                            .revoke_tokens(
+                                &p.user,
+                                Duration::from_secs(factory.expiration_seconds()),
+                            )
+                            .await?;
+                    }
+                    self.context.storage.delete_passkey(&p.user).await?;
+                    Ok(Value::Null)
+                } else {
+                    Err(Error::failed("Authenticator not configured"))
+                }
+            }
+            "admin.user.list" => {
+                if let Some(ref auth) = self.context.authenticator {
+                    let users = auth.list().await?;
+                    Ok(to_value(users)?)
+                } else {
+                    Err(Error::failed("Authenticator not configured"))
+                }
+            }
+            "admin.user.set_password" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    user: String,
+                    password: String,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                if let Some(ref auth) = self.context.authenticator {
+                    auth.set_password_forced(&p.user, &p.password).await?;
+                    if let Some(ref factory) = self.context.token_factory {
+                        self.context
+                            .storage
+                            .revoke_tokens(
+                                &p.user,
+                                Duration::from_secs(factory.expiration_seconds()),
+                            )
+                            .await?;
+                    }
+                    Ok(Value::Null)
+                } else {
+                    Err(Error::failed("Authenticator not configured"))
+                }
+            }
+            _ => Err(Error::RpcMethodNotFound(format!(
+                "Admin RPC method '{}' not found",
+                method
+            ))),
+        }
+    }
+}
+
+#[async_trait]
+impl RpcHandlers for MasterHandlers {
+    #[allow(clippy::too_many_lines)]
+    async fn handle_call(&self, event: RpcEvent) -> RpcResult {
+        match event.parse_method()? {
+            // log http message
+            "l" => {
+                let Some(ref logger) = self.context.logger else {
+                    return Err(RpcError::internal(None));
+                };
+                let payload = event.payload();
+                logger
+                    .lock()
+                    .await
+                    .write(payload)
+                    .await
+                    .map_err(|_| RpcError::internal(None))?;
+                Ok(None)
+            }
+            "lm" => {
+                let Some(ref meta_logger) = self.context.meta_logger else {
+                    return Err(RpcError::internal(None));
+                };
+                let payload = event.payload();
+                meta_logger
+                    .lock()
+                    .await
+                    .write(payload)
+                    .await
+                    .map_err(|_| RpcError::internal(None))?;
+                Ok(None)
+            }
+            // validate token
+            "t.v" => {
+                let Some(ref token_factory) = self.context.token_factory else {
+                    return Err(RpcError::method(None));
+                };
+                let token_str: String = event.unpack_payload()?;
+                let res = token_factory
+                    .validate(token_str, self.context.storage.as_ref())
+                    .await;
+                Ok(Some(pack(res)?))
+            }
+            // is token revoked
+            "t.rev" => {
+                let cv: ClaimsView = event.unpack_payload()?;
+                let res = self
+                    .context
+                    .storage
+                    .is_token_revoked(&cv.sub, cv.iat)
+                    .await?;
+                Ok(Some(pack(res)?))
+            }
+            // get token factory public
+            "t.public" => {
+                let public = self
+                    .context
+                    .token_factory
+                    .as_ref()
+                    .map(tokens::Factory::to_public);
+                Ok(Some(pack(public)?))
+            }
+            "c.get" => {
+                let (uuid_str, ip_address): (String, IpAddr) = event.unpack_payload()?;
+                let uuid = Uuid::parse_str(&uuid_str).map_err(|_| RpcError::invalid(None))?;
+                let secret = if let Some(ref bp) = self.context.bp {
+                    bp.get_captcha_secret(uuid, ip_address)?
+                } else {
+                    None
+                };
+                Ok(Some(pack(secret)?))
+            }
+            "a" => {
+                let (payload, remote_ip): (AuthPayload, IpAddr) = event.unpack_payload()?;
+                let res = self.authenticate(payload, remote_ip).await?;
+                Ok(Some(pack(res)?))
+            }
+            "pk.present" => {
+                let token_str: Zeroizing<String> = event.unpack_payload_ser()?;
+                if self.context.passkey_factory.is_none() {
+                    return Ok(Some(pack_json(None::<bool>)?));
+                }
+                let user = self.get_user(&token_str).await?;
+                Ok(Some(pack_json(Some(
+                    self.context.storage.has_passkey(&user).await?,
+                ))?))
+            }
+            "pk.delete" => {
+                let token_str: Zeroizing<String> = event.unpack_payload_ser()?;
+                let user = self.get_user(&token_str).await?;
+                self.context.storage.delete_passkey(&user).await?;
+                Ok(Some(pack_json(true)?))
+            }
+            "pk.sa" => {
+                let remote_ip: IpAddr = event.unpack_payload_ser()?;
+                if self.context.token_factory.is_none() {
+                    return Err(RpcError::method(None));
+                }
+                let Some(ref passkey_factory) = self.context.passkey_factory else {
+                    return Err(RpcError::method(None));
+                };
+                let res = passkey_factory.start_authentication(remote_ip)?;
+                Ok(Some(pack_json(res)?))
+            }
+            "pk.fa" => {
+                let (challenge, auth, remote_ip): (Base64UrlSafeData, PublicKeyCredential, IpAddr) =
+                    event.unpack_payload_ser()?;
+                let res = self
+                    .authenticate_passkey(challenge, auth, remote_ip)
+                    .await?;
+                Ok(Some(pack_json(res)?))
+            }
+            "pk.sr" => {
+                let token_str: String = event.unpack_payload_ser()?;
+                let user = self.get_user(&token_str).await?;
+                let Some(ref passkey_factory) = self.context.passkey_factory else {
+                    return Err(RpcError::method(None));
+                };
+                let res = passkey_factory.start_registration(&user)?;
+                Ok(Some(pack_json(res)?))
+            }
+            "pk.fr" => {
+                let (token_str, reg): (String, RegisterPublicKeyCredential) =
+                    event.unpack_payload_ser()?;
+                let user = self.get_user(&token_str).await?;
+                let Some(ref passkey_factory) = self.context.passkey_factory else {
+                    return Err(RpcError::method(None));
+                };
+                passkey_factory
+                    .finish_registration(&user, reg, &*self.context.storage)
+                    .await?;
+                Ok(Some(pack_json(true)?))
+            }
+            "a.passwd" => {
+                let (p, _remote_ip): (ChangePasswordPayload, IpAddr) = event.unpack_payload()?;
+                let user = self.get_user(&p.token_str).await?;
+                if let Some(ref auth) = self.context.authenticator {
+                    auth.set_password(&user, &p.old_password, &p.new_password)
+                        .await?;
+                    if let Some(ref factory) = self.context.token_factory {
+                        self.context
+                            .storage
+                            .revoke_tokens(&user, Duration::from_secs(factory.expiration_seconds()))
+                            .await?;
+                    }
+                    Ok(None)
+                } else {
+                    Err(Error::failed("Authenticator not configured").into())
+                }
+            }
+            "!" => {
+                let (admin_request, remote_ip): (TransferredRequest, IpAddr) =
+                    event.unpack_payload_ser()?;
+                let res = self.handle_admin_rpc(admin_request, remote_ip).await?;
+                Ok(Some(pack_json(res)?))
+            }
+            _ => Err(RpcError::method(None)),
+        }
+    }
+}
+
+async fn run_master_api_impl(
+    fd: i32,
+    child_pid: libc::pid_t,
+    config: Zeroizing<Config>,
+    virtual_app_map: Arc<VAppMap>,
+    primary_system_host: Option<String>,
+) -> Result<()> {
+    let storage = storage::create(config.db.as_ref()).await?;
+    storage.init().await?;
+    storage
+        .clone()
+        .spawn_cleanup_worker(CLEANUP_WORKER_INTERVAL);
+    let mut context = Context {
+        admin_auth: None,
+        authenticator: None,
+        bp: None,
+        passkey_factory: None,
+        logger: None,
+        meta_logger: None,
+        token_factory: None,
+        token_domain: None,
+        token_domain_dot_prefixed: None,
+        storage: storage.clone(),
+        development: is_developent_mode(),
+    };
+    if let Some(ref admin_config) = config.admin {
+        let admin_auth = admin::Auth::init(admin_config).await?;
+        context.admin_auth = Some(admin_auth);
+    }
+    if let Some(ref auth_config) = config.auth {
+        let authenticator =
+            authenticator::create_authenticator(auth_config, storage.clone()).await?;
+        authenticator.spawn_secure_workers().await?;
+        context.authenticator.replace(authenticator);
+        context.token_factory.replace(
+            tokens::Factory::init(&auth_config.tokens, primary_system_host.as_deref()).await?,
+        );
+        context.token_domain.clone_from(&auth_config.tokens.domain);
+        context.token_domain_dot_prefixed = auth_config
+            .tokens
+            .domain
+            .as_ref()
+            .map(|d| format!(".{}", d));
+        let bp_engine = Arc::new(bp::BreakinProtection::from_config(
+            &auth_config.breakin_protection,
+        ));
+        bp_engine
+            .clone()
+            .spawn_cleanup_worker(CLEANUP_WORKER_INTERVAL);
+        context.bp.replace(bp_engine);
+        if let Some(system_hosts) = virtual_app_map.system_hosts()
+            && let Some(ref passkey_config) = auth_config.passkeys
+        {
+            match passkeys::Factory::create(system_hosts, passkey_config) {
+                Ok(factory) => {
+                    context.passkey_factory.replace(factory);
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to create passkey factory");
+                }
+            }
+        }
+    } else {
+        warn!("AUTHENTICATION ENGINE IS DISABLED");
+    }
+    let std_stream = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
+    std_stream.set_nonblocking(true)?;
+    let stream = UnixStream::from_std(std_stream)?;
+    context.logger = config
+        .server
+        .http_log
+        .as_ref()
+        .map(|path| Mutex::new(Logger::new(path)));
+    context.meta_logger = config
+        .ml
+        .as_ref()
+        .and_then(|m| m.extractor_output.as_ref())
+        .map(|path| Mutex::new(Logger::new(path)));
+    let mut broker = Broker::new();
+    let master_config = busrt::broker::ServerConfig::new()
+        .payload_size_limit(4196)
+        .timeout(Duration::from_secs(5));
+
+    let core_client = broker.register_client("m").await?;
+    let _crpc = RpcClient::new(core_client, MasterHandlers { context });
+    debug!("master: API server starting...");
+    broker.spawn_server_connection(stream, master_config)?;
+    debug!("master: API server started");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    loop {
+        assert!(process_alive_nondefunct(child_pid), "worker died");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+pub fn serve(
+    fd: i32,
+    child_pid: libc::pid_t,
+    config: Zeroizing<Config>,
+    virtual_app_map: Arc<VAppMap>,
+    primary_system_host: Option<String>,
+) -> Result<()> {
+    crate::panic_handler::register_pid(child_pid);
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(run_master_api_impl(
+        fd,
+        child_pid,
+        config,
+        virtual_app_map,
+        primary_system_host,
+    ))?;
+    Ok(())
+}

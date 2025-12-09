@@ -1,0 +1,184 @@
+use core::fmt;
+use std::time::Duration;
+
+use crate::{ByteResponse, Result, StdError};
+use http::Request;
+use http_body_util::{BodyExt as _, Full};
+use hyper::{HeaderMap, Response, Uri, body::Incoming};
+use serde::Serialize;
+use tracing::error;
+
+#[cfg(target_os = "linux")]
+use crate::Error;
+#[cfg(target_os = "linux")]
+use std::ffi::CString;
+
+pub fn rewrite_location_header(headers: &mut HeaderMap, original_host: &str, with_tls: bool) {
+    let Some(location) = headers.get("location") else {
+        return;
+    };
+    let Ok(location_str) = location.to_str() else {
+        return;
+    };
+    let Ok(location_uri) = Uri::try_from(location_str) else {
+        return;
+    };
+    let had_scheme_and_authority =
+        location_uri.scheme().is_some() && location_uri.authority().is_some();
+    let new_path_and_query = location_uri.path_and_query().map_or(
+        "/",
+        tokio_tungstenite::tungstenite::http::uri::PathAndQuery::as_str,
+    );
+    let new_uri = if had_scheme_and_authority {
+        let original_scheme = if with_tls { "https" } else { "http" };
+        format!(
+            "{}://{}{}",
+            original_scheme, original_host, new_path_and_query
+        )
+    } else {
+        new_path_and_query.to_string()
+    };
+    if let Ok(new_location_uri) = Uri::try_from(new_uri) {
+        headers.insert("location", new_location_uri.to_string().parse().unwrap());
+    }
+}
+
+pub async fn http_response<T: fmt::Display>(code: u16, text: T) -> ByteResponse {
+    if code >= 400 {
+        synth_sleep().await;
+    }
+    Response::builder()
+        .status(code)
+        .header("Content-Type", "text/html; charset=utf-8")
+        .body(
+            Full::from(text.to_string())
+                .map_err(|e| Box::new(e) as StdError)
+                .boxed(),
+        )
+        .unwrap()
+}
+
+pub async fn http_internal_server_error() -> ByteResponse {
+    http_response(500, "Internal Server Error").await
+}
+
+pub async fn http_ser_json_response<V: Serialize>(value: V) -> ByteResponse {
+    let json_body = match serde_json::to_string(&value) {
+        Ok(body) => body,
+        Err(e) => {
+            error!(error = %e, "Failed to serialize JSON response");
+            return http_internal_server_error().await;
+        }
+    };
+    http_json_response(json_body)
+}
+
+pub fn http_json_response(json_body: String) -> ByteResponse {
+    Response::builder()
+        .status(200)
+        .header("Content-Type", "application/json")
+        .body(
+            Full::from(json_body)
+                .map_err(|e| Box::new(e) as StdError)
+                .boxed(),
+        )
+        .unwrap()
+}
+
+// A synthetic sleep to mitigate error attacks and other similar
+pub async fn synth_sleep() {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+}
+
+pub fn resolve_host(request: &Request<Incoming>) -> Option<String> {
+    if let Some(authority) = request.uri().authority() {
+        return Some(authority.as_str().to_owned());
+    }
+    if let Some(host_header) = request.headers().get("host")
+        && let Ok(host_str) = host_header.to_str()
+    {
+        return Some(host_str.to_owned());
+    }
+    None
+}
+
+pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    let cookie_headers = headers.get_all("cookie");
+    for header_value in cookie_headers {
+        if let Ok(header_str) = header_value.to_str() {
+            for cookie in header_str.split(';').map(str::trim) {
+                let Some((cookie_name, cookie_value)) = cookie.split_once('=') else {
+                    continue;
+                };
+                if cookie_name == name {
+                    return Some(cookie_value.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn downgrade_to_http1(request: &mut Request<Incoming>) {
+    request.version_mut().clone_from(&hyper::Version::HTTP_11);
+    // combine cookies
+    let mut cookies = vec![];
+    for cookie_header in &request.headers().get_all("cookie") {
+        if let Ok(s) = cookie_header.to_str() {
+            cookies.push(s.to_owned());
+        }
+    }
+    request.headers_mut().remove("cookie");
+    if !cookies.is_empty() {
+        let combined = cookies.join("; ");
+        request
+            .headers_mut()
+            .insert("cookie", combined.parse().unwrap());
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn drop_privileges(user: &str) -> Result<()> {
+    let u = get_system_user(user)?;
+    if nix::unistd::getuid() != u.uid {
+        let c_user = CString::new(user)
+            .map_err(|e| Error::failed(format!("Failed to parse user {}: {}", user, e)))?;
+
+        let groups = nix::unistd::getgrouplist(&c_user, u.gid)
+            .map_err(|e| Error::failed(format!("Failed to get groups for user {}: {}", user, e)))?;
+        nix::unistd::setgroups(&groups).map_err(|e| {
+            Error::failed(format!(
+                "Failed to switch the process groups for user {}: {}",
+                user, e
+            ))
+        })?;
+        nix::unistd::setgid(u.gid).map_err(|e| {
+            Error::failed(format!(
+                "Failed to switch the process group for user {}: {}",
+                user, e
+            ))
+        })?;
+        nix::unistd::setuid(u.uid).map_err(|e| {
+            Error::failed(format!(
+                "Failed to switch the process user to {}: {}",
+                user, e
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+#[allow(clippy::unnecessary_wraps)]
+pub fn drop_privileges(_user: &str) -> Result<()> {
+    tracing::warn!("WARNING privileges not dropped");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn get_system_user(user: &str) -> Result<nix::unistd::User> {
+    let u = nix::unistd::User::from_name(user)
+        .map_err(|e| Error::failed(format!("failed to get the system user {}: {}", user, e)))?
+        .ok_or_else(|| Error::failed(format!("Failed to locate the system user {}", user)))?;
+    Ok(u)
+}

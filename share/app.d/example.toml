@@ -1,0 +1,18 @@
+# Application name
+name = "Example App"
+# External application URL
+url = "https://example.domain.local/"
+# HTTP hosts to reply
+hosts = ["example.domain.local"]
+# Remote target to connect to
+remote = "http://192.168.1.10:8080/"
+# Path to application icon (relative to the primary configuration file)
+icon = "icons/generic.png"
+# Target timeout (default: 10 seconds)
+#timeout = 10
+# Application visibility in the list (default: false)
+#hidden = false
+# Use authentication (default: true)
+#use_auth = true
+# For remote HTTPS targets, skip TLS verification (default: false)
+#skip_remote_tls_verify = false

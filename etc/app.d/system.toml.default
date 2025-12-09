@@ -1,0 +1,8 @@
+# System application
+
+url = "gateryx://system"
+
+hosts = [ "gate.domain.local" ]
+
+# System applcation web
+remote = "/var/gateryx/www/system"

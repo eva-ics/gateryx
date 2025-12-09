@@ -1,0 +1,70 @@
+#!/bin/sh
+
+( useradd -r gateryx -s /usr/sbin/nologin -d /var/gateryx || exit 0 )
+systemctl enable gateryx
+if [ "$1" = "configure" ] && [ -z "$2" ]; then
+
+if [ ! -f /etc/gateryx/config.toml ]; then
+  cp /etc/gateryx/config.toml.default /etc/gateryx/config.toml
+  chmod 600 /etc/gateryx/config.toml
+fi
+
+if [ ! -f /etc/gateryx/app.d/system.toml ]; then
+  cp /etc/gateryx/app.d/system.toml.default /etc/gateryx/app.d/system.toml
+fi
+
+if [ ! -f /etc/gateryx/app.d/plain.toml ]; then
+  cp /etc/gateryx/app.d/plain.toml.default /etc/gateryx/app.d/plain.toml
+fi
+
+cp /usr/share/gateryx/app.d/example.toml /etc/gateryx/app.d/
+
+mkdir -p /var/gateryx/log
+chmod 700 /var/gateryx/log
+
+mkdir -p /var/gateryx/db
+chmod 700 /var/gateryx/db
+
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out /etc/gateryx/tokens.pem
+chmod 600 /etc/gateryx/tokens.pem
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out /etc/gateryx/admin.pem
+chmod 600 /etc/gateryx/admin.pem
+
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+  -nodes -keyout /etc/gateryx/selfsigned.pem -out /etc/gateryx/selfsigned.crt \
+  -days 3650 \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+(
+cat << EOF
+/var/gateryx/log/access.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+}
+EOF
+) > /etc/logrotate.d/gateryx
+
+cat << EOF
+Service gateryx enabled
+
+To start the server, execute
+
+  systemctl start gateryx
+
+To create a user account, execute
+
+  gateryx user create <username>
+
+EOF
+elif [ "$1" = "configure" ] && [ -n "$2" ]; then
+  systemctl restart gateryx
+fi
+
+rm -rf /var/gateryx/www/auth
+rm -rf /var/gateryx/www/system
+
+mv /usr/share/gateryx/www/* /var/gateryx/www/
