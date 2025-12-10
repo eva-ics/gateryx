@@ -1,7 +1,7 @@
 # Application name
 name = "Example App"
-# External application URL
-url = "https://example.domain.local/"
+# External application URL, for non-standard layouts
+#url = "https://example.domain.local/"
 # HTTP hosts to reply
 hosts = ["example.domain.local"]
 # Remote target to connect to
