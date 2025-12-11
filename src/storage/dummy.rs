@@ -11,7 +11,7 @@ pub struct Storage {}
 
 #[async_trait::async_trait]
 impl super::Storage for Storage {
-    async fn revoke_tokens(&self, _sub: &str, _record_expires: Duration) -> Result<()> {
+    async fn invalidate(&self, _sub: &str, _record_expires: Duration) -> Result<()> {
         warn!("Token revocation is not supported with Dummy storage");
         Ok(())
     }

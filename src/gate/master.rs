@@ -253,7 +253,7 @@ impl MasterHandlers {
     ) -> Result<Value> {
         match method {
             "admin.test" => Ok(serde_json::json!({"ok": true})),
-            "admin.revoke_tokens" => {
+            "admin.invalidate" => {
                 #[derive(Deserialize)]
                 struct Params {
                     user: String,
@@ -266,7 +266,7 @@ impl MasterHandlers {
                 let expires = p.expires.unwrap_or(factory.expiration_seconds());
                 self.context
                     .storage
-                    .revoke_tokens(&p.user, Duration::from_secs(expires))
+                    .invalidate(&p.user, Duration::from_secs(expires))
                     .await?;
                 Ok(Value::Null)
             }
@@ -295,10 +295,7 @@ impl MasterHandlers {
                     if let Some(ref factory) = self.context.token_factory {
                         self.context
                             .storage
-                            .revoke_tokens(
-                                &p.user,
-                                Duration::from_secs(factory.expiration_seconds()),
-                            )
+                            .invalidate(&p.user, Duration::from_secs(factory.expiration_seconds()))
                             .await?;
                     }
                     self.context.storage.delete_passkey(&p.user).await?;
@@ -327,10 +324,7 @@ impl MasterHandlers {
                     if let Some(ref factory) = self.context.token_factory {
                         self.context
                             .storage
-                            .revoke_tokens(
-                                &p.user,
-                                Duration::from_secs(factory.expiration_seconds()),
-                            )
+                            .invalidate(&p.user, Duration::from_secs(factory.expiration_seconds()))
                             .await?;
                     }
                     Ok(Value::Null)
@@ -488,7 +482,7 @@ impl RpcHandlers for MasterHandlers {
                     if let Some(ref factory) = self.context.token_factory {
                         self.context
                             .storage
-                            .revoke_tokens(&user, Duration::from_secs(factory.expiration_seconds()))
+                            .invalidate(&user, Duration::from_secs(factory.expiration_seconds()))
                             .await?;
                     }
                     Ok(None)

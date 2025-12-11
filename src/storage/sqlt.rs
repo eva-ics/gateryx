@@ -93,7 +93,7 @@ impl super::Storage for Storage {
         Ok(())
     }
 
-    async fn revoke_tokens(&self, user: &str, record_expires: Duration) -> Result<()> {
+    async fn invalidate(&self, user: &str, record_expires: Duration) -> Result<()> {
         let now = Timestamp::now();
         let keep_until = now + record_expires;
         sqlx::query(

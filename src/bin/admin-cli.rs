@@ -34,7 +34,6 @@ struct Args {
 #[derive(Parser)]
 enum Command {
     Test,
-    RevokeTokens(RevokeTokensCommand),
     #[clap(subcommand)]
     User(UserCommand),
     Version,
@@ -46,6 +45,7 @@ enum UserCommand {
     Create(CreateUserCommand),
     Delete(DeleteUserCommand),
     Password(SetPasswordCommand),
+    Invalidate(InvalidateCommand),
 }
 
 #[derive(Parser)]
@@ -67,7 +67,7 @@ struct SetPasswordCommand {
 }
 
 #[derive(Parser)]
-struct RevokeTokensCommand {
+struct InvalidateCommand {
     #[clap()]
     user: String,
     #[clap(
@@ -288,14 +288,6 @@ async fn main() -> Result<()> {
             let _: Empty = client.call("admin.test", serde_json::json!({})).await?;
             ok!();
         }
-        Command::RevokeTokens(RevokeTokensCommand { user, expires }) => {
-            let params = serde_json::json!({
-                "user": user,
-                "expires": expires,
-            });
-            let _: () = client.call("admin.revoke_tokens", params).await?;
-            ok!();
-        }
         Command::User(user_cmd) => match user_cmd {
             UserCommand::List => {
                 let users: Vec<UserInfo> = client.call("admin.user.list", ()).await?;
@@ -350,6 +342,14 @@ async fn main() -> Result<()> {
                     "password": password
                 });
                 let _: () = client.call("admin.user.set_password", params).await?;
+                ok!();
+            }
+            UserCommand::Invalidate(InvalidateCommand { user, expires }) => {
+                let params = serde_json::json!({
+                    "user": user,
+                    "expires": expires,
+                });
+                let _: () = client.call("admin.invalidate", params).await?;
                 ok!();
             }
         },
