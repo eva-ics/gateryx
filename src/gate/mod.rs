@@ -123,7 +123,7 @@ async fn run_gate(
     }
     if let Some(ml_config) = ml_config {
         context_data.meta_extractor = Some(ml::extractor::RequestFeatureExtractor::new(
-            ml_config.window_size,
+            ml_config.window_size.as_secs(),
         ));
         if ml_config.extractor_output.is_some() {
             context_data.meta_logger = Some(logger::spawn_meta(master_client.clone()));

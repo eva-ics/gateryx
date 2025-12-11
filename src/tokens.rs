@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use crate::{ConfigCheckIssue, Error, Result, storage::Storage, util::get_cookie};
+use crate::{
+    ConfigCheckIssue, Error, Result,
+    storage::Storage,
+    util::{GDuration, get_cookie},
+};
 use bincode::{Decode, Encode};
 use bma_ts::Timestamp;
 use http::HeaderMap;
@@ -19,7 +23,8 @@ const JWKS_PATH: &str = "/.well-known/jwks.json";
 pub struct Config {
     #[zeroize(skip)]
     key_file: PathBuf,
-    expire: u64,
+    #[zeroize(skip)]
+    expire: GDuration,
     pub domain: Option<String>,
 }
 
@@ -217,7 +222,7 @@ impl Factory {
         Ok(Self {
             encoding_key,
             decoding_key,
-            expiration_seconds: config.expire,
+            expiration_seconds: config.expire.as_secs(),
             issuer_uri: system_host.map(|s| format!("https://{}", s)),
             jwks_uri: system_host.map(|s| format!("https://{}/{}", s, JWKS_PATH)),
             public_key,

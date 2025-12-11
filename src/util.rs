@@ -1,11 +1,11 @@
 use core::fmt;
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
-use crate::{ByteResponse, Result, StdError};
+use crate::{ByteResponse, Error, Result, StdError};
 use http::Request;
 use http_body_util::{BodyExt as _, Full};
 use hyper::{HeaderMap, Response, Uri, body::Incoming};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::error;
 
 #[cfg(target_os = "linux")]
@@ -181,4 +181,77 @@ pub fn get_system_user(user: &str) -> Result<nix::unistd::User> {
         .map_err(|e| Error::failed(format!("failed to get the system user {}: {}", user, e)))?
         .ok_or_else(|| Error::failed(format!("Failed to locate the system user {}", user)))?;
     Ok(u)
+}
+
+pub fn default_true() -> bool {
+    true
+}
+
+pub fn default_timeout() -> GDuration {
+    GDuration(Duration::from_secs(10))
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct GDuration(Duration);
+
+impl FromStr for GDuration {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if let Ok(usecs) = s.parse::<u64>() {
+            return Ok(GDuration(Duration::from_secs(usecs)));
+        }
+        if let Ok(fsecs) = s.parse::<f64>() {
+            if fsecs < 0.0 {
+                return Err(Error::invalid_data("Duration cannot be negative"));
+            }
+            return Ok(GDuration(Duration::from_secs_f64(fsecs)));
+        }
+        let dur = humantime::parse_duration(s).map_err(Error::invalid_data)?;
+        Ok(GDuration(dur))
+    }
+}
+
+impl GDuration {
+    pub fn as_secs(&self) -> u64 {
+        self.0.as_secs()
+    }
+    pub fn from_secs(secs: u64) -> Self {
+        GDuration(Duration::from_secs(secs))
+    }
+}
+
+impl From<GDuration> for Duration {
+    fn from(hd: GDuration) -> Self {
+        hd.0
+    }
+}
+
+impl<'de> Deserialize<'de> for GDuration {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum DurationVariant {
+            Secs(u64),
+            SecsFloat(f64),
+            Str(String),
+        }
+        let d = DurationVariant::deserialize(deserializer)?;
+        match d {
+            DurationVariant::Secs(s) => Ok(GDuration(Duration::from_secs(s))),
+            DurationVariant::SecsFloat(f) => {
+                if f < 0.0 {
+                    return Err(serde::de::Error::custom("Duration cannot be negative"));
+                }
+                Ok(GDuration(Duration::from_secs_f64(f)))
+            }
+            DurationVariant::Str(s) => {
+                let dur = humantime::parse_duration(&s).map_err(serde::de::Error::custom)?;
+                Ok(GDuration(dur))
+            }
+        }
+    }
 }

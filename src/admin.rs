@@ -18,14 +18,18 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use crate::{ConfigCheckIssue, Error, Result, authenticator::RandomSleeper, util::synth_sleep};
+use crate::{
+    ConfigCheckIssue, Error, Result,
+    authenticator::RandomSleeper,
+    util::{GDuration, synth_sleep},
+};
 
 const HEADER_CONTENT_DIGEST: HeaderName = HeaderName::from_static("content-digest");
 const HEADER_SIGNATURE_INPUT: HeaderName = HeaderName::from_static("signature-input");
 const HEADER_SIGNATURE: HeaderName = HeaderName::from_static("signature");
 
-fn default_admin_max_time_diff() -> f64 {
-    300.0
+fn default_admin_max_time_diff() -> GDuration {
+    GDuration::from_secs(300)
 }
 
 #[derive(Deserialize, Clone, Zeroize, ZeroizeOnDrop)]
@@ -36,7 +40,8 @@ pub struct Config {
     #[zeroize(skip)]
     pub allow: Vec<IpNetwork>,
     #[serde(default = "default_admin_max_time_diff")]
-    pub max_time_diff: f64,
+    #[zeroize(skip)]
+    pub max_time_diff: GDuration,
 }
 
 impl Config {
@@ -165,7 +170,7 @@ impl Auth {
             signature_params,
             secret_key,
             verifiying_key: PublicKey::EcdsaP256Sha256(public_key),
-            max_time_diff: Duration::from_secs_f64(config.max_time_diff),
+            max_time_diff: config.max_time_diff.into(),
         })
     }
     pub async fn parse_transferred_request(

@@ -8,7 +8,7 @@ use tracing::error;
 use webauthn_rs::prelude::Passkey;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{ConfigCheckIssue, Result, authenticator::UserInfo};
+use crate::{ConfigCheckIssue, Result, authenticator::UserInfo, util::GDuration};
 
 mod dummy;
 mod sqlt;
@@ -68,7 +68,8 @@ pub trait Storage: Send + Sync {
 pub struct Config {
     uri: String,
     pool_size: u32,
-    timeout: u64,
+    #[zeroize(skip)]
+    timeout: GDuration,
 }
 
 impl Config {
@@ -84,7 +85,7 @@ impl Config {
                 "Pool size must be greater than 0".to_string(),
             ));
         }
-        if self.timeout == 0 {
+        if self.timeout.as_secs() == 0 {
             issues.push(ConfigCheckIssue::Error(
                 "Timeout must be greater than 0".to_string(),
             ));

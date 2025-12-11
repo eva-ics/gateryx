@@ -29,7 +29,7 @@ mod serve;
 mod storage;
 mod tls;
 mod tokens;
-mod util;
+pub mod util;
 pub mod vapp;
 mod ws;
 
@@ -37,6 +37,8 @@ pub use app::AppHostMap;
 pub use error::{ConfigCheckIssue, Error};
 pub use gate::run;
 pub use vapp::VAppMap;
+
+use crate::util::GDuration;
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub type ByteResponse = Response<BoxBody<Bytes, StdError>>;
@@ -102,7 +104,8 @@ fn default_threads() -> usize {
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 pub struct ServerConfig {
-    pub timeout: u64,
+    #[zeroize(skip)]
+    pub timeout: GDuration,
     #[serde(default = "default_threads")]
     pub master_threads: usize,
     #[serde(default = "default_threads")]
@@ -182,12 +185,4 @@ impl ListenerConfig {
         }
         issues
     }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-pub fn default_timeout() -> u64 {
-    10
 }

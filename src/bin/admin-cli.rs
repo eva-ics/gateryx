@@ -6,16 +6,14 @@ use gateryx::{
     admin::Config as AdminConfig,
     authenticator::UserInfo,
     rpc::{RpcRequest, RpcResponse, URI_RPC, URI_RPC_ADMIN},
+    util::GDuration,
 };
 use http::Request;
 use hyper::body::Bytes;
 use prettytable::{Table, row};
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
 
 const SERVER_TOML: &str = "/etc/gateryx/config.toml";
 
@@ -72,9 +70,9 @@ struct InvalidateCommand {
     user: String,
     #[clap(
         long,
-        help = "In seconds, override revocation record expiration time (default: configured value)"
+        help = "Override revocation record expiration time (default: configured value)"
     )]
-    expires: Option<u64>,
+    expires: Option<GDuration>,
 }
 
 pub struct RpcClient {
@@ -95,7 +93,7 @@ impl RpcClient {
             req_id: 1,
             url: client_config.url,
             web_client: Client::builder()
-                .timeout(Duration::from_secs(client_config.timeout))
+                .timeout(client_config.timeout.into())
                 .build()
                 .map_err(Error::failed)?,
             admin_auth,
@@ -177,8 +175,8 @@ enum ConfigVariant {
 struct ClientConfig {
     key_file: Option<PathBuf>,
     url: String,
-    #[serde(default = "gateryx::default_timeout")]
-    timeout: u64,
+    #[serde(default = "gateryx::util::default_timeout")]
+    timeout: GDuration,
 }
 
 impl ClientConfig {
@@ -216,7 +214,6 @@ impl TryFrom<ConfigVariant> for ClientConfig {
                     "http"
                 };
                 let url = format!("{}://{}", proto, host);
-                let timeout = Duration::from_secs(c.server.timeout);
                 let key_file = c
                     .admin
                     .as_ref()
@@ -224,7 +221,7 @@ impl TryFrom<ConfigVariant> for ClientConfig {
                 Ok(ClientConfig {
                     key_file,
                     url,
-                    timeout: timeout.as_secs(),
+                    timeout: c.server.timeout,
                 })
             }
         }
@@ -347,7 +344,7 @@ async fn main() -> Result<()> {
             UserCommand::Invalidate(InvalidateCommand { user, expires }) => {
                 let params = serde_json::json!({
                     "user": user,
-                    "expires": expires,
+                    "expires": expires.map(|v| v.as_secs()),
                 });
                 let _: () = client.call("admin.invalidate", params).await?;
                 ok!();

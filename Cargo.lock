@@ -1232,6 +1232,7 @@ dependencies = [
  "http-body-util",
  "httpdate",
  "httpsig-hyper",
+ "humantime",
  "hyper",
  "hyper-rustls",
  "hyper-staticfile",
@@ -1530,6 +1531,12 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
 ]
+
+[[package]]
+name = "humantime"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
 
 [[package]]
 name = "hyper"

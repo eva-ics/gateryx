@@ -334,7 +334,7 @@ pub async fn prepare_privileged(
         let listener = TcpListener::bind(&listener_config.bind).await?;
         listeners.push(listener);
     }
-    let timeout = Duration::from_secs(config.server.timeout);
+    let timeout = Duration::from(config.server.timeout);
     let tls_config = rustls::ClientConfig::builder()
         .with_native_roots()?
         .with_no_client_auth();

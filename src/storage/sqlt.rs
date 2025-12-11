@@ -21,7 +21,7 @@ impl Storage {
         if !config.uri.starts_with("sqlite://") {
             return Err(Error::failed("Only sqlite storage is supported"));
         }
-        let timeout = Duration::from_secs(config.timeout);
+        let timeout = Duration::from(config.timeout);
         let opts = SqliteConnectOptions::from_str(&config.uri)?
             .create_if_missing(true)
             .synchronous(SqliteSynchronous::Extra)

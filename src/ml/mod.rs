@@ -3,10 +3,12 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use crate::util::GDuration;
+
 pub mod extractor;
 
-fn default_ml_extractor_window_size() -> u64 {
-    30
+fn default_ml_extractor_window_size() -> GDuration {
+    GDuration::from_secs(30)
 }
 
 #[derive(Deserialize, Clone, Zeroize, ZeroizeOnDrop)]
@@ -15,5 +17,6 @@ pub struct Config {
     #[zeroize(skip)]
     pub extractor_output: Option<PathBuf>,
     #[serde(default = "default_ml_extractor_window_size")]
-    pub window_size: u64,
+    #[zeroize(skip)]
+    pub window_size: GDuration,
 }

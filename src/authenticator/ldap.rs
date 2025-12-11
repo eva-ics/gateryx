@@ -1,4 +1,8 @@
-use crate::{Error, Result, authenticator::RandomSleeper, util::synth_sleep};
+use crate::{
+    Error, Result,
+    authenticator::RandomSleeper,
+    util::{GDuration, synth_sleep},
+};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -80,10 +84,6 @@ enum Provider {
     Authentik,
 }
 
-fn default_timeout() -> f64 {
-    5.0
-}
-
 fn default_pool_size() -> usize {
     1
 }
@@ -106,8 +106,9 @@ pub struct Config {
     no_tls_verify: bool,
     #[serde(default)]
     provider: Provider,
-    #[serde(default = "default_timeout")]
-    timeout: f64,
+    #[serde(default = "crate::util::default_timeout")]
+    #[zeroize(skip)]
+    timeout: GDuration,
     #[serde(default = "default_pool_size")]
     pool_size: usize,
     #[serde(default = "default_auth_pool_size")]
@@ -148,7 +149,7 @@ async fn try_init_pool(config: &Config, cert: Option<&Certificate>) -> Result<Re
 
 impl LdapPool {
     fn init(config: &Config, cert: Option<&Certificate>) -> Self {
-        let timeout = Duration::from_secs_f64(config.timeout);
+        let timeout = config.timeout.into();
         let ldap_pool: Arc<Mutex<Option<Arc<ResourcePool<Ldap>>>>> = <_>::default();
         Self {
             pool: ldap_pool,
@@ -319,7 +320,7 @@ impl Ldap {
                 config.service_password.as_str(),
             )
         };
-        let timeout = Duration::from_secs_f64(config.timeout);
+        let timeout = config.timeout.into();
         let mut settings = ldap3::LdapConnSettings::new()
             .set_no_tls_verify(config.no_tls_verify)
             .set_starttls(config.starttls)

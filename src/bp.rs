@@ -14,7 +14,7 @@ use sqlite::Connection;
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::Result;
+use crate::{Result, util::GDuration};
 
 const CAPTCHA_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -22,7 +22,8 @@ const CAPTCHA_TIMEOUT: Duration = Duration::from_secs(300);
 #[serde(deny_unknown_fields)]
 pub struct Config {
     max_records: usize,
-    window: u32,
+    #[zeroize(skip)]
+    window: GDuration,
     ip_score: u64,
     user_score: u64,
     captcha_threshold: u64,
@@ -59,7 +60,7 @@ impl BreakinProtection {
     pub fn from_config(config: &Config) -> Self {
         Self::new(
             config.max_records,
-            Duration::from_secs(u64::from(config.window)),
+            Duration::from(config.window),
             config.ip_score,
             config.user_score,
             config.captcha_threshold,

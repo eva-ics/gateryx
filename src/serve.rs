@@ -417,7 +417,7 @@ async fn handle_http_request(
             return Ok(http_internal_server_error().await);
         };
     }
-    let app_timeout = Duration::from_secs(app.timeout);
+    let app_timeout = Duration::from(app.timeout);
     let Ok(remote_uri) = Uri::try_from(&app.remote) else {
         error!(ip = %remote_ip, host = %original_host, remote = %app.remote, "Invalid remote URI");
         return Ok(http_response(500, "Invalid remote URI").await);

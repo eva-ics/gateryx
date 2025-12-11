@@ -16,10 +16,10 @@ use webauthn_rs::{
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{Error, Result, authenticator::RandomSleeper, storage::Storage};
+use crate::{Error, Result, authenticator::RandomSleeper, storage::Storage, util::GDuration};
 
-fn default_timeout() -> f64 {
-    60.0
+fn default_timeout() -> GDuration {
+    GDuration::from_secs(60)
 }
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -28,8 +28,9 @@ pub struct Config {
     max_auth_challenges: usize,
     max_auth_challenges_per_ip: Option<usize>,
     #[serde(default = "default_timeout")]
-    timeout: f64,
-    #[serde(default = "crate::default_true")]
+    #[zeroize(skip)]
+    timeout: GDuration,
+    #[serde(default = "crate::util::default_true")]
     check_login_present: bool,
 }
 
@@ -47,8 +48,8 @@ impl Factory {
     where
         H: AsRef<str>,
     {
-        let timeout = Duration::from_secs_f64(config.timeout);
         let mut i = system_hosts.iter();
+        let timeout = config.timeout.into();
         let primary_host = i
             .next()
             .ok_or(Error::invalid_data("no system hosts provided"))?

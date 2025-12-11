@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use url::Url;
 
-use crate::{ConfigCheckIssue, Error, Result};
+use crate::{ConfigCheckIssue, Error, Result, util::GDuration};
 
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -23,9 +23,9 @@ pub struct Config {
     #[serde(default)]
     pub hosts: Vec<String>,
     pub remote: String,
-    #[serde(default = "crate::default_timeout")]
-    pub timeout: u64,
-    #[serde(default = "crate::default_true")]
+    #[serde(default = "crate::util::default_timeout")]
+    pub timeout: GDuration,
+    #[serde(default = "crate::util::default_true")]
     pub use_auth: bool,
     #[serde(default)]
     pub hidden: bool,

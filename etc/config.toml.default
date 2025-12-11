@@ -14,6 +14,18 @@ authenticator = { kind = "db", params = { policy = { min_length = 6, require_upp
 
 # LDAP authenticator
 #
+# * path - LDAP search base DN for user accounts (e.g. "ou=users,dc=domain,dc=com")
+# * service_user - LDAP service account username (e.g. "service" or "cn=service,dc=domain,dc=com")
+# * service_password - LDAP service account password
+# * url - LDAP server URL (e.g. "ldap://somehost:389" or "ldaps://somehost:636")
+# * provider - LDAP server provider
+# * starttls - optional boolean parameter to enable STARTTLS for ldap:// URLs (default: false)
+# * no_tls_verify - optional boolean parameter to disable TLS certificate verification (default: false)
+# * timeout - optional connection timeout in seconds (default: 5)
+# * pool_size - optional connection pool size (default: 1)
+# * auth_pool_size - optional authentication connection pool size (default: 1)
+#
+#
 # supported providers:
 # * "msad" - Microsoft Active Directory
 # * "authentik" - Authentik LDAP server
@@ -25,11 +37,11 @@ authenticator = { kind = "db", params = { policy = { min_length = 6, require_upp
 # Breakin protection configuration
 #
 # * max_records - maximum number of remote clients to track
-# * window - time window in seconds
+# * window - time window
 # * ip_score - score to add for each failed attempt from the same IP address
 # * user_score - score to add for each failed attempt for the same username
 # * captcha_threshold - score threshold to require captcha verification
-breakin_protection = { max_records = 10000, window = 600, ip_score = 1, user_score = 1, captcha_threshold = 3 }
+breakin_protection = { max_records = 10000, window = "10m", ip_score = 1, user_score = 1, captcha_threshold = 3 }
 
 # Passkeys
 #
@@ -41,9 +53,9 @@ breakin_protection = { max_records = 10000, window = 600, ip_score = 1, user_sco
 passkeys = { max_auth_challenges = 100, max_reg_challenges = 10, timeout = 60 }
 
 # key_file: PKCS#8 private key in PEM format, eg. openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out tokens.pem
-# expire: token expiration time in seconds since the token was issued
+# expire: token expiration time since the token was issued
 # domain: token validation for subdomains of the specified domain, also used as rp_id for passkeys
-tokens = { key_file = "tokens.pem", expire = 604800, domain = "domain.local" }
+tokens = { key_file = "tokens.pem", expire = "7d", domain = "domain.local" }
 
 # authentication form web
 www_root = "/var/gateryx/www/auth"
@@ -89,4 +101,4 @@ key_file = "admin.pem"
 # allowed hosts/networks (ip addresses only)
 allow = ["127.0.0.1/32"]
 # max time difference in seconds between server and client for admin requests
-#max_time_diff = 300
+#max_time_diff = "5m"

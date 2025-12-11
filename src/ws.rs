@@ -219,7 +219,7 @@ async fn proxy_ws_with_headers(
 
     debug!(ip = %remote_ip, ws_request = ?ws_request, "Requesting upstream WebSocket server");
 
-    let timeout = Duration::from_secs(app.timeout);
+    let timeout = Duration::from(app.timeout);
 
     let server_ws = match tokio::time::timeout(
         timeout,
@@ -338,7 +338,7 @@ pub async fn handle(
     worker_pool: TaskPool,
 ) -> ByteResponse {
     if hyper_tungstenite::is_upgrade_request(&req) {
-        let timeout = Duration::from_secs(app.timeout);
+        let timeout = Duration::from(app.timeout);
         let uri = req.uri().clone();
         let headers = req.headers().clone();
         // Extract upgrade
