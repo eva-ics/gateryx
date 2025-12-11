@@ -61,6 +61,14 @@ pub struct ContextData {
     pub master_client: Client,
 }
 
+impl ContextData {
+    pub fn host_matches_token_domain(&self, host: &str) -> bool {
+        self.token_domain_dot_prefixed
+            .as_ref()
+            .is_some_and(|d| host.ends_with(d))
+    }
+}
+
 #[derive(Copy, Clone)]
 enum ApiMethod {
     WriteLog,

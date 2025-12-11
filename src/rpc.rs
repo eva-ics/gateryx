@@ -15,7 +15,7 @@ use crate::{
     gate::{AuthPayload, AuthResponse, worker::Context},
     passkeys::{Base64UrlSafeData, PublicKeyCredential, RegisterPublicKeyCredential},
     tokens,
-    util::{http_response, http_ser_json_response, synth_sleep},
+    util::{http_response, http_ser_json_response, resolve_host, synth_sleep},
 };
 
 const JSON_RPC_VERSION: &str = "2.0";
@@ -203,11 +203,17 @@ fn get_token_str(headers: &HeaderMap) -> Result<Zeroizing<String>> {
         .ok_or_else(|| Error::access("Valid authentication token required"))
 }
 
-fn token_value(token_str: Zeroizing<String>, exp: u64, context: &Context) -> Value {
-    serde_json::json!({ "token": token_str, "exp": exp, "domain": context.token_domain})
+fn token_value(host: &str, token_str: Zeroizing<String>, exp: u64, context: &Context) -> Value {
+    let domain = if context.host_matches_token_domain(host) {
+        context.token_domain.as_deref()
+    } else {
+        None
+    };
+    serde_json::json!({ "token": token_str, "exp": exp, "domain": domain})
 }
 
 async fn process_auth<F>(
+    host: &str,
     auth: F,
     p: Option<&AuthPayload>,
     remote_ip: IpAddr,
@@ -228,7 +234,7 @@ where
         Ok(AuthResponse::Success((token_str, user, exp))) => {
             let token_str = Zeroizing::new(token_str);
             info!(ip = %remote_ip, user = %user, "User logged in successfully");
-            Ok(token_value(token_str, exp, context))
+            Ok(token_value(host, token_str, exp, context))
         }
         Ok(AuthResponse::AuthNotEnabled) => {
             synth_sleep().await;
@@ -265,6 +271,7 @@ where
 
 #[allow(clippy::too_many_lines)]
 async fn rpc_regular(
+    host: &str,
     headers: &HeaderMap,
     method: &str,
     params: Value,
@@ -292,6 +299,9 @@ async fn rpc_regular(
         }
         "gate.passkey.auth.start" => {
             synth_sleep().await;
+            if !context.host_matches_token_domain(host) {
+                return Ok(Value::Null);
+            };
             let challenge = match context.master_client.passkey_auth_start(remote_ip).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -310,6 +320,7 @@ async fn rpc_regular(
             synth_sleep().await;
             let p: Params = serde_json::from_value(params)?;
             process_auth(
+                host,
                 context
                     .master_client
                     .passkey_auth_finish(p.challenge, p.auth, remote_ip),
@@ -349,6 +360,7 @@ async fn rpc_regular(
         "gate.authenticate" => {
             let p: AuthPayload = serde_json::from_value(params)?;
             process_auth(
+                host,
                 context.master_client.authenticate(&p, remote_ip),
                 Some(&p),
                 remote_ip,
@@ -408,6 +420,7 @@ pub(crate) async fn handle(
     remote_ip: IpAddr,
     context: &Context,
 ) -> HByteResult {
+    let host = resolve_host(&http_request).unwrap_or_default();
     let (parts, body) = http_request.into_parts();
     if parts.method == http::Method::OPTIONS {
         #[cfg(debug_assertions)]
@@ -444,7 +457,7 @@ pub(crate) async fn handle(
     let RpcRequest {
         id, method, params, ..
     } = rpc_request;
-    match rpc_regular(&parts.headers, &method, params, remote_ip, context).await {
+    match rpc_regular(&host, &parts.headers, &method, params, remote_ip, context).await {
         Ok(response) => {
             info!(ip = %remote_ip, method = %method, "RPC method call succeeded");
             Ok(RpcResponse::new_result(id, response)

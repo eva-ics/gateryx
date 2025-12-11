@@ -40,7 +40,10 @@ const setToken = (res: any, remember: boolean) => {
 const fillPasskey = async () => {
   const opts = await engine.call("gate.passkey.auth.start", {});
   console.log("Starting passkey lookup");
-  const challenge = opts.publicKey.challenge;
+  const challenge = opts?.publicKey?.challenge;
+  if (!challenge) {
+    return;
+  }
   const auth = await startAuthentication({
     optionsJSON: opts.publicKey,
     useBrowserAutofill: true
