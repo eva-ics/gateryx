@@ -1,3 +1,9 @@
+# The notation used for
+#
+# * Large numbers - k = 1_000, m = 1_000_000, g = 1_000_000_000
+# * Time durations - s = seconds (default if not specified), m = minutes,
+#                    h = hours, d = days, w = weeks, M = months, y = years
+#
 [auth]
 # Authenticator configuration
 # Note: there can be only one authenticator configured at a time
