@@ -637,9 +637,14 @@ pub async fn handle_listener(
         let mut tls_key_buf = tls.key_buf.lock();
         let key = PrivateKeyDer::from_pem_slice(&tls_key_buf)?;
         mem::take::<Zeroizing<Vec<u8>>>(&mut tls_key_buf);
-        let mut tls_config = tokio_rustls::rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)?;
+        let mut tls_config = tokio_rustls::rustls::ServerConfig::builder_with_protocol_versions(
+            &tls.protocols
+                .iter()
+                .map(|p| p.as_supported_rustls_version())
+                .collect::<Vec<&rustls::SupportedProtocolVersion>>(),
+        )
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
         if config.http2 {
             tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         }

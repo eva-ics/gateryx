@@ -9,6 +9,27 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 type TlsResult<T> = std::result::Result<T, rustls::Error>;
 
+#[derive(Deserialize, Copy, Clone)]
+pub enum Protocol {
+    #[serde(rename = "tls1.2")]
+    TLSv1_2,
+    #[serde(rename = "tls1.3")]
+    TLSv1_3,
+}
+
+impl Protocol {
+    pub fn as_supported_rustls_version(self) -> &'static rustls::SupportedProtocolVersion {
+        match self {
+            Protocol::TLSv1_2 => &rustls::version::TLS12,
+            Protocol::TLSv1_3 => &rustls::version::TLS13,
+        }
+    }
+}
+
+pub fn default_protocols() -> Vec<Protocol> {
+    vec![Protocol::TLSv1_2, Protocol::TLSv1_3]
+}
+
 #[derive(Deserialize, Clone, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -22,6 +43,9 @@ pub struct Config {
     #[serde(skip)]
     #[zeroize(skip)]
     pub key_buf: Arc<parking_lot::Mutex<Zeroizing<Vec<u8>>>>,
+    #[serde(default = "default_protocols")]
+    #[zeroize(skip)]
+    pub protocols: Vec<Protocol>,
 }
 
 impl Config {

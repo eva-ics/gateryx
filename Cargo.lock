@@ -1210,7 +1210,7 @@ dependencies = [
 
 [[package]]
 name = "gateryx"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
@@ -2885,9 +2885,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.33"
+version = "0.23.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "751e04a496ca00bb97a5e043158d23d66b5aabf2e1d5aa2a0aaebb1aafe6f82c"
+checksum = "533f54bc6a7d4f647e46ad909549eda97bf5afc1585190ef692b4286b198bd8f"
 dependencies = [
  "aws-lc-rs",
  "log",

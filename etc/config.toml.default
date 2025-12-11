@@ -58,7 +58,7 @@ app = "plain"
 bind = "0.0.0.0:443"
 max_clients = 100
 max_workers = 500
-tls = { cert = "selfsigned.crt", key = "selfsigned.pem" }
+tls = { cert = "selfsigned.crt", key = "selfsigned.pem", protocols = ["tls1.2", "tls1.3"] }
 http2 = true
 
 [server]
