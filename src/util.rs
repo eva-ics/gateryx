@@ -2,16 +2,24 @@ use core::fmt;
 use std::{str::FromStr, time::Duration};
 
 use crate::{ByteResponse, Error, Result, StdError};
-use http::Request;
+use http::{HeaderValue, Request};
 use http_body_util::{BodyExt as _, Full};
 use hyper::{HeaderMap, Response, Uri, body::Incoming};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
 #[cfg(target_os = "linux")]
-use crate::Error;
-#[cfg(target_os = "linux")]
 use std::ffi::CString;
+
+fn parse_header_value<V: AsRef<str>>(s: V) -> Result<HeaderValue> {
+    match s.as_ref().parse::<HeaderValue>() {
+        Ok(hv) => Ok(hv),
+        Err(e) => {
+            error!(error = %e, value=%s.as_ref(), "Failed to parse header value");
+            Err(Error::invalid_data("invalid header value"))
+        }
+    }
+}
 
 pub fn rewrite_location_header(headers: &mut HeaderMap, original_host: &str, with_tls: bool) {
     let Some(location) = headers.get("location") else {
@@ -39,10 +47,16 @@ pub fn rewrite_location_header(headers: &mut HeaderMap, original_host: &str, wit
         new_path_and_query.to_string()
     };
     if let Ok(new_location_uri) = Uri::try_from(new_uri) {
-        headers.insert("location", new_location_uri.to_string().parse().unwrap());
+        let Ok(v) = parse_header_value(new_location_uri.to_string()) else {
+            return;
+        };
+        headers.insert("location", v);
     }
 }
 
+/// # Panics
+///
+/// Should be used by internal / verified methods only
 pub async fn http_response<T: fmt::Display>(code: u16, text: T) -> ByteResponse {
     if code >= 400 {
         synth_sleep().await;
@@ -73,6 +87,9 @@ pub async fn http_ser_json_response<V: Serialize>(value: V) -> ByteResponse {
     http_json_response(json_body)
 }
 
+/// # Panics
+///
+/// Should be used by internal / verified methods only
 pub fn http_json_response(json_body: String) -> ByteResponse {
     Response::builder()
         .status(200)
@@ -131,9 +148,10 @@ pub fn downgrade_to_http1(request: &mut Request<Incoming>) {
     request.headers_mut().remove("cookie");
     if !cookies.is_empty() {
         let combined = cookies.join("; ");
-        request
-            .headers_mut()
-            .insert("cookie", combined.parse().unwrap());
+        let Ok(v) = parse_header_value(combined) else {
+            return;
+        };
+        request.headers_mut().insert("cookie", v);
     }
 }
 
@@ -189,6 +207,92 @@ pub fn default_true() -> bool {
 
 pub fn default_timeout() -> GDuration {
     GDuration(Duration::from_secs(10))
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct Numeric(u32);
+
+impl From<u32> for Numeric {
+    fn from(n: u32) -> Self {
+        Numeric(n)
+    }
+}
+
+impl From<Numeric> for u32 {
+    fn from(n: Numeric) -> Self {
+        n.0
+    }
+}
+
+impl From<Numeric> for u64 {
+    fn from(n: Numeric) -> Self {
+        u64::from(n.0)
+    }
+}
+
+impl From<Numeric> for usize {
+    fn from(n: Numeric) -> Self {
+        usize::try_from(n.0).unwrap()
+    }
+}
+
+impl FromStr for Numeric {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if let Ok(u) = s.parse::<u32>() {
+            return Ok(Numeric(u));
+        }
+        let (value_part, suffix) = s.trim().split_at(
+            s.trim()
+                .find(|c: char| !c.is_numeric() && c != '.')
+                .unwrap_or(s.len()),
+        );
+        let base: u32 = value_part
+            .parse()
+            .map_err(|_| Error::invalid_data(format!("Invalid numeric value '{}'", value_part)))?;
+
+        let multiplier = match suffix.to_ascii_lowercase().as_str() {
+            "k" => 1_000,
+            "m" => 1_000_000,
+            "g" => 1_000_000_000,
+            "" => 1,
+            v => {
+                return Err(Error::invalid_data(format!(
+                    "Invalid suffix '{}' in numeric value",
+                    v
+                )));
+            }
+        };
+
+        let val = base
+            .checked_mul(multiplier)
+            .ok_or_else(|| Error::invalid_data(format!("Numeric value '{}' is too large", s)))?;
+
+        Ok(Numeric(val))
+    }
+}
+
+impl<'de> Deserialize<'de> for Numeric {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum NumericVariant {
+            Int(u32),
+            Str(String),
+        }
+        let n = NumericVariant::deserialize(deserializer)?;
+        match n {
+            NumericVariant::Int(i) => Ok(Numeric(i)),
+            NumericVariant::Str(s) => {
+                let parsed = s.parse::<Numeric>().map_err(serde::de::Error::custom)?;
+                Ok(parsed)
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

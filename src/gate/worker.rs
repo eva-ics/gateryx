@@ -360,7 +360,7 @@ pub async fn prepare_privileged(
         token_domain_dot_prefixed: None,
         token_factory_public: None,
         timeout,
-        max_body_size: config.server.max_body_size,
+        max_body_size: config.server.max_body_size.map(Into::into),
         http_logger: None,
         meta_logger: None,
         meta_extractor: None,

@@ -38,7 +38,7 @@ pub use error::{ConfigCheckIssue, Error};
 pub use gate::run;
 pub use vapp::VAppMap;
 
-use crate::util::GDuration;
+use crate::util::{GDuration, Numeric};
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub type ByteResponse = Response<BoxBody<Bytes, StdError>>;
@@ -97,8 +97,8 @@ impl Config {
     }
 }
 
-fn default_threads() -> usize {
-    1
+fn default_threads() -> Numeric {
+    1u32.into()
 }
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -107,13 +107,16 @@ pub struct ServerConfig {
     #[zeroize(skip)]
     pub timeout: GDuration,
     #[serde(default = "default_threads")]
-    pub master_threads: usize,
+    #[zeroize(skip)]
+    pub master_threads: Numeric,
     #[serde(default = "default_threads")]
-    pub worker_threads: usize,
+    #[zeroize(skip)]
+    pub worker_threads: Numeric,
     #[zeroize(skip)]
     pub http_log: Option<PathBuf>,
     pub default_app: Option<String>,
-    pub max_body_size: Option<u64>,
+    #[zeroize(skip)]
+    pub max_body_size: Option<Numeric>,
     pub user: Option<String>,
 }
 
@@ -129,12 +132,12 @@ impl ServerConfig {
     }
 }
 
-fn default_max_clients() -> usize {
-    100
+fn default_max_clients() -> Numeric {
+    100u32.into()
 }
 
-fn default_max_workers() -> usize {
-    200
+fn default_max_workers() -> Numeric {
+    200u32.into()
 }
 
 #[derive(Deserialize, Clone, Zeroize, ZeroizeOnDrop)]
@@ -142,9 +145,11 @@ fn default_max_workers() -> usize {
 pub struct ListenerConfig {
     pub bind: String,
     #[serde(default = "default_max_clients")]
-    max_clients: usize,
+    #[zeroize(skip)]
+    max_clients: Numeric,
     #[serde(default = "default_max_workers")]
-    max_workers: usize,
+    #[zeroize(skip)]
+    max_workers: Numeric,
     pub tls: Option<tls::Config>,
     #[zeroize(skip)]
     pub app: Option<Arc<String>>,

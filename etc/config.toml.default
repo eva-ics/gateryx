@@ -41,7 +41,7 @@ authenticator = { kind = "db", params = { policy = { min_length = 6, require_upp
 # * ip_score - score to add for each failed attempt from the same IP address
 # * user_score - score to add for each failed attempt for the same username
 # * captcha_threshold - score threshold to require captcha verification
-breakin_protection = { max_records = 10000, window = "10m", ip_score = 1, user_score = 1, captcha_threshold = 3 }
+breakin_protection = { max_records = "10k", window = "10m", ip_score = 1, user_score = 1, captcha_threshold = 3 }
 
 # Passkeys
 #
@@ -50,7 +50,7 @@ breakin_protection = { max_records = 10000, window = "10m", ip_score = 1, user_s
 # * timeout - challenge validity time in seconds
 # * max_auth_callenges_per_ip - maximum number of allowed authentication challenges per IP address
 # * check_login_present - require the selected authenticator to confirm that the user exists (default: true)
-passkeys = { max_auth_challenges = 100, max_reg_challenges = 10, timeout = 60 }
+passkeys = { max_auth_challenges = "1k", max_reg_challenges = 10, timeout = 60 }
 
 # key_file: PKCS#8 private key in PEM format, eg. openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out tokens.pem
 # expire: token expiration time since the token was issued
@@ -62,14 +62,14 @@ www_root = "/var/gateryx/www/auth"
 
 [[listener]]
 bind = "0.0.0.0:80"
-max_clients = 100
-max_workers = 500
+max_clients = "1k"
+max_workers = "5k"
 app = "plain"
 
 [[listener]]
 bind = "0.0.0.0:443"
-max_clients = 100
-max_workers = 500
+max_clients = "1k"
+max_workers = "5k"
 tls = { cert = "selfsigned.crt", key = "selfsigned.pem", protocols = ["tls1.2", "tls1.3"] }
 http2 = true
 
@@ -79,15 +79,15 @@ http_log =  "/var/gateryx/log/access.log"
 master_threads = 1
 # number of worker threads (responsible for processing web requests)
 worker_threads = 1
-max_body_size = 20000000
+max_body_size = "20m"
 timeout = 5
 user = "gateryx"
 
 #[websocket_default]
-#read_buffer = 16384
-#write_buffer = 16384
-#max_message_size = 40485760
-#max_frame_size = 10485760
+#read_buffer = "16k"
+#write_buffer = "16k"
+#max_message_size = "40m"
+#max_frame_size = "40m"
 
 # only SQLite is supported currently, PostgreSQL suport is coming very soon
 [db]

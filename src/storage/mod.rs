@@ -8,7 +8,11 @@ use tracing::error;
 use webauthn_rs::prelude::Passkey;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{ConfigCheckIssue, Result, authenticator::UserInfo, util::GDuration};
+use crate::{
+    ConfigCheckIssue, Result,
+    authenticator::UserInfo,
+    util::{GDuration, Numeric},
+};
 
 mod dummy;
 mod sqlt;
@@ -67,7 +71,8 @@ pub trait Storage: Send + Sync {
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Config {
     uri: String,
-    pool_size: u32,
+    #[zeroize(skip)]
+    pool_size: Numeric,
     #[zeroize(skip)]
     timeout: GDuration,
 }
@@ -80,7 +85,7 @@ impl Config {
                 "Only sqlite storage is supported".to_string(),
             ));
         }
-        if self.pool_size == 0 {
+        if u32::from(self.pool_size) == 0 {
             issues.push(ConfigCheckIssue::Error(
                 "Pool size must be greater than 0".to_string(),
             ));

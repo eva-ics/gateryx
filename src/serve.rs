@@ -654,9 +654,12 @@ pub async fn handle_listener(
     };
     let force_app = config.app.clone();
     let client_pool = Arc::new(
-        tokio_task_pool::Pool::bounded(config.max_clients).with_spawn_timeout(context.timeout),
+        tokio_task_pool::Pool::bounded(config.max_clients.into())
+            .with_spawn_timeout(context.timeout),
     );
-    let worker_pool = TaskPool(Arc::new(tokio_task_pool::Pool::bounded(config.max_workers)));
+    let worker_pool = TaskPool(Arc::new(tokio_task_pool::Pool::bounded(
+        config.max_workers.into(),
+    )));
     tokio::spawn({
         let client_pool = client_pool.clone();
         let worker_pool = worker_pool.clone();

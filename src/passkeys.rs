@@ -16,7 +16,12 @@ use webauthn_rs::{
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{Error, Result, authenticator::RandomSleeper, storage::Storage, util::GDuration};
+use crate::{
+    Error, Result,
+    authenticator::RandomSleeper,
+    storage::Storage,
+    util::{GDuration, Numeric},
+};
 
 fn default_timeout() -> GDuration {
     GDuration::from_secs(60)
@@ -24,9 +29,12 @@ fn default_timeout() -> GDuration {
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Config {
-    max_reg_challenges: usize,
-    max_auth_challenges: usize,
-    max_auth_challenges_per_ip: Option<usize>,
+    #[zeroize(skip)]
+    max_reg_challenges: Numeric,
+    #[zeroize(skip)]
+    max_auth_challenges: Numeric,
+    #[zeroize(skip)]
+    max_auth_challenges_per_ip: Option<Numeric>,
     #[serde(default = "default_timeout")]
     #[zeroize(skip)]
     timeout: GDuration,
@@ -71,11 +79,11 @@ impl Factory {
         }
         Ok(Self {
             webauthn,
-            reg_challenges: Mutex::new(TtlCache::new(config.max_reg_challenges)),
-            login_challenges: Mutex::new(TtlCache::new(config.max_auth_challenges)),
+            reg_challenges: Mutex::new(TtlCache::new(config.max_reg_challenges.into())),
+            login_challenges: Mutex::new(TtlCache::new(config.max_auth_challenges.into())),
             timeout,
             check_login_present: config.check_login_present,
-            max_auth_challenges_per_ip: config.max_auth_challenges_per_ip,
+            max_auth_challenges_per_ip: config.max_auth_challenges_per_ip.map(Into::into),
         })
     }
     pub fn need_check_login_present(&self) -> bool {

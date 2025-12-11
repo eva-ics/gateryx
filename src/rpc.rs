@@ -301,7 +301,7 @@ async fn rpc_regular(
             synth_sleep().await;
             if !context.host_matches_token_domain(host) {
                 return Ok(Value::Null);
-            };
+            }
             let challenge = match context.master_client.passkey_auth_start(remote_ip).await {
                 Ok(v) => v,
                 Err(e) => {

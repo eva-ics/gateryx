@@ -18,38 +18,38 @@ use crate::{
     gate::worker::Context,
     serve::TaskPool,
     tokens::ClaimsView,
-    util::{http_internal_server_error, http_response},
+    util::{Numeric, http_internal_server_error, http_response},
 };
 
 const TOKEN_CHECK_MAX_TIME: Duration = Duration::from_secs(5);
 
-fn default_websocket_read_buffer_size() -> usize {
-    1024 * 16
+fn default_websocket_read_buffer_size() -> Numeric {
+    (1024 * 16u32).into()
 }
 
-fn default_websocket_write_buffer_size() -> usize {
-    1024 * 16
+fn default_websocket_write_buffer_size() -> Numeric {
+    (1024 * 16u32).into()
 }
 
-fn default_websocket_max_message_size() -> usize {
-    1024 * 1024 * 4
+fn default_websocket_max_message_size() -> Numeric {
+    (1024 * 1024 * 4u32).into()
 }
 
-fn default_websocket_max_frame_size() -> usize {
-    1024 * 1024
+fn default_websocket_max_frame_size() -> Numeric {
+    (1024 * 1024).into()
 }
 
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default = "default_websocket_read_buffer_size")]
-    pub read_buffer: usize,
+    pub read_buffer: Numeric,
     #[serde(default = "default_websocket_write_buffer_size")]
-    pub write_buffer: usize,
+    pub write_buffer: Numeric,
     #[serde(default = "default_websocket_max_message_size")]
-    pub max_message_size: usize,
+    pub max_message_size: Numeric,
     #[serde(default = "default_websocket_max_frame_size")]
-    pub max_frame_size: usize,
+    pub max_frame_size: Numeric,
 }
 
 impl Default for Config {
@@ -66,11 +66,11 @@ impl Default for Config {
 impl From<Config> for tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
     fn from(c: Config) -> Self {
         let mut config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
-        config.read_buffer_size = c.read_buffer;
-        config.write_buffer_size = c.write_buffer;
-        config.max_write_buffer_size = c.write_buffer * 2;
-        config.max_message_size = Some(c.max_message_size);
-        config.max_frame_size = Some(c.max_frame_size);
+        config.read_buffer_size = c.read_buffer.into();
+        config.write_buffer_size = c.write_buffer.into();
+        config.max_write_buffer_size = usize::from(c.write_buffer) * 2;
+        config.max_message_size = Some(c.max_message_size.into());
+        config.max_frame_size = Some(c.max_frame_size.into());
         config
     }
 }

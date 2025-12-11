@@ -31,7 +31,7 @@ impl Storage {
         let pool = SqlitePoolOptions::new()
             // initialize all connections while in privileged mode
             //.min_connections(config.pool_size)
-            .max_connections(config.pool_size)
+            .max_connections(config.pool_size.into())
             //.max_lifetime(None)
             //.idle_timeout(None)
             .acquire_timeout(timeout)

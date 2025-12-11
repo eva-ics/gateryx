@@ -182,7 +182,7 @@ pub fn run(
         }
     }
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(config.server.worker_threads)
+        .worker_threads(config.server.worker_threads.into())
         .enable_all()
         .build()?;
     rt.block_on(async move {
