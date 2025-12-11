@@ -140,6 +140,15 @@ fn default_max_workers() -> Numeric {
     200u32.into()
 }
 
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum L7Protocol {
+    #[default]
+    #[serde(alias = "http")]
+    Http1,
+    Http2,
+}
+
 #[derive(Deserialize, Clone, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerConfig {
@@ -154,7 +163,8 @@ pub struct ListenerConfig {
     #[zeroize(skip)]
     pub app: Option<Arc<String>>,
     #[serde(default)]
-    pub http2: bool,
+    #[zeroize(skip)]
+    pub protocol: L7Protocol,
 }
 
 impl ListenerConfig {

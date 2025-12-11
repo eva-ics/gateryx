@@ -71,7 +71,8 @@ bind = "0.0.0.0:443"
 max_clients = "1k"
 max_workers = "5k"
 tls = { cert = "selfsigned.crt", key = "selfsigned.pem", protocols = ["tls1.2", "tls1.3"] }
-http2 = true
+# allows HTTP/2
+protocol = "http2"
 
 [server]
 http_log =  "/var/gateryx/log/access.log"

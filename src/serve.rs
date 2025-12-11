@@ -629,7 +629,8 @@ pub async fn handle_listener(
     config: ListenerConfig,
     context: Context,
 ) -> Result<()> {
-    let http2 = config.http2;
+    let proto = config.protocol;
+    let mut http2 = false;
     let acceptor = if let Some(ref tls) = config.tls {
         let mut certs_buf: Cursor<Vec<u8>> = Cursor::new(mem::take(tls.cert_buf.lock().as_mut()));
         let certs = CertificateDer::pem_reader_iter(&mut certs_buf)
@@ -645,8 +646,12 @@ pub async fn handle_listener(
         )
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
-        if config.http2 {
-            tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        match proto {
+            crate::L7Protocol::Http1 => {}
+            crate::L7Protocol::Http2 => {
+                tls_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+                http2 = true;
+            }
         }
         Some(TlsAcceptor::from(Arc::new(tls_config)))
     } else {
