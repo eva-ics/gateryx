@@ -14,6 +14,8 @@ on fast, battle-tested elliptic-curve cryptography (P-256), it provides
 passwordless Passkey authentication, ES256-signed JWT and OIDC tokens, and
 ECDSA-secured administrative access.
 
+[Technical Documentation](https://info.bma.ai/en/actual/gateryx/index.html)
+
 Key benefits
 ============
 
