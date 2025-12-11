@@ -29,7 +29,7 @@ Key benefits
   internal tools, cloud apps, developer portals, and dashboards.
 
 * Hardened Administrative Control Plane. Protect admin endpoints using RFC 9421
-  ECDSA-signed requests—no passwords, no bearer tokens.
+  ECDSA-signed requests - no passwords, no bearer tokens.
 
 * High-Performance Edge Security Layer. Ultra-low latency ingress thanks to
   master–worker socketpairs and lightweight verification paths.
