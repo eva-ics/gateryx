@@ -138,6 +138,19 @@ pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 pub fn downgrade_to_http11(request: &mut Request<Incoming>, keep_token_cookie: bool) {
     request.version_mut().clone_from(&hyper::Version::HTTP_11);
+    for header in &["http2-settings", "te", "transfer-encoding"] {
+        request.headers_mut().remove(*header);
+    }
+    // remove headers starting with ":"
+    let keys_to_remove: Vec<_> = request
+        .headers()
+        .keys()
+        .filter(|k| k.as_str().starts_with(':'))
+        .cloned()
+        .collect();
+    for key in keys_to_remove {
+        request.headers_mut().remove(key);
+    }
     // combine cookies
     let mut cookies = vec![];
     for cookie_header in &request.headers().get_all("cookie") {
