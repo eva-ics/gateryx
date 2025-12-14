@@ -10,6 +10,26 @@ use url::Url;
 
 use crate::{ConfigCheckIssue, Error, Result, util::GDuration};
 
+#[derive(Deserialize, Copy, Clone, Default)]
+pub enum AppClientKind {
+    #[serde(rename = "http1.0")]
+    Http0,
+    #[default]
+    #[serde(rename = "http1.1", alias = "http1")]
+    Http1,
+    #[serde(rename = "http2")]
+    Http2,
+}
+
+impl AppClientKind {
+    pub fn insert_gateryx_headers(self) -> bool {
+        match self {
+            AppClientKind::Http0 => false,
+            AppClientKind::Http1 | AppClientKind::Http2 => true,
+        }
+    }
+}
+
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -23,6 +43,8 @@ pub struct Config {
     #[serde(default)]
     pub hosts: Vec<String>,
     pub remote: String,
+    #[serde(default)]
+    pub client: AppClientKind,
     #[serde(default = "crate::util::default_timeout")]
     pub timeout: GDuration,
     #[serde(default = "crate::util::default_true")]

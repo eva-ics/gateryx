@@ -144,7 +144,7 @@ fn default_max_workers() -> Numeric {
 #[serde(rename_all = "snake_case")]
 pub enum L7Protocol {
     #[default]
-    #[serde(alias = "http")]
+    #[serde(alias = "http", alias = "http1", alias = "http1.1")]
     Http1,
     Http2,
 }

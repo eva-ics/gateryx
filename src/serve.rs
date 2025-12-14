@@ -1,6 +1,6 @@
 use std::{io::Cursor, mem, net::IpAddr, sync::Arc, time::Duration};
 
-use http::{HeaderValue, Method, uri::PathAndQuery};
+use http::{HeaderValue, Method, header, uri::PathAndQuery};
 use http_body_util::{BodyExt as _, Full};
 use hyper::{
     Request, Response, Uri,
@@ -25,6 +25,8 @@ use zeroize::Zeroizing;
 const URI_AUTH: &str = "/.gateryx/auth";
 const URI_AUTH_PREFIX: &str = "/.gateryx/auth/";
 const URI_AUTH_CAPTCHA: &str = "/.gateryx/auth/captcha";
+
+const KEEP_ALIVE: HeaderValue = HeaderValue::from_static("keep-alive");
 
 type UpstreamClient =
     Arc<Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Incoming>>;
@@ -448,17 +450,19 @@ async fn handle_http_request(
     request
         .headers_mut()
         .insert("host", authority.as_str().parse().unwrap());
-    insert_jwt_assertion(jwt_token.as_deref(), &mut request);
     request.headers_mut().insert(
         "origin",
         format!("{}://{}", scheme, authority.as_str())
             .parse()
             .unwrap(),
     );
-    if let Some(sub) = token_sub
-        && let Ok(s) = sub.parse()
-    {
-        request.headers_mut().insert("X-Gateryx-User", s);
+    if app.client.insert_gateryx_headers() {
+        if let Some(sub) = token_sub
+            && let Ok(s) = sub.parse()
+        {
+            request.headers_mut().insert("X-Gateryx-User", s);
+        }
+        insert_jwt_assertion(jwt_token.as_deref(), &mut request);
     }
     if request
         .headers()
@@ -483,8 +487,25 @@ async fn handle_http_request(
     let (mut parts, body) = request.into_parts();
     parts.uri = remote_uri;
     let mut request = Request::from_parts(parts, body);
-    if http2 {
-        downgrade_to_http1(&mut request);
+    let keep_alive = request
+        .headers()
+        .get(header::CONNECTION)
+        .is_some_and(|v| v == "keep-alive");
+    match app.client {
+        crate::app::AppClientKind::Http0 => {
+            if http2 {
+                downgrade_to_http1(&mut request);
+            }
+            // remove unsafe http/1.1 headers
+            request.headers_mut().remove(header::ACCEPT_ENCODING);
+            request.headers_mut().remove(header::CONNECTION);
+        }
+        crate::app::AppClientKind::Http1 => {
+            if http2 {
+                downgrade_to_http1(&mut request);
+            }
+        }
+        crate::app::AppClientKind::Http2 => {}
     }
     debug!(ip = %remote_ip, request=?request, "Forwarding request to upstream");
     let res = match tokio::time::timeout(app_timeout, upstream_client.request(request)).await {
@@ -492,6 +513,12 @@ async fn handle_http_request(
             // convert body to boxed body, keep headers and status code
             let (mut parts, body) = v.into_parts();
             parts.headers.append("X-Via", "Gateryx".parse().unwrap());
+            if http2 {
+                parts.headers.remove(header::CONNECTION);
+            } else if keep_alive {
+                // preserve keep-alive for http/1.1 clients
+                parts.headers.insert(header::CONNECTION, KEEP_ALIVE.clone());
+            }
             // rewrite location header with ME
             util::rewrite_location_header(&mut parts.headers, &original_host, with_tls);
             let boxed_body = body.map_err(|e| Box::new(e) as StdError).boxed();
@@ -531,6 +558,7 @@ async fn handle_stream<S>(
     let upstream_client = Arc::new(
         Client::builder(worker_pool.clone())
             .pool_idle_timeout(context.timeout)
+            .http1_title_case_headers(true)
             .build(connector),
     );
     let dangerous_upstream_client: Option<UpstreamClient> =
@@ -543,6 +571,7 @@ async fn handle_stream<S>(
             Arc::new(
                 Client::builder(worker_pool.clone())
                     .pool_idle_timeout(context.timeout)
+                    .http1_title_case_headers(true)
                     .build(dangerous_connector),
             )
         });
