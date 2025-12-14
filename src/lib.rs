@@ -18,6 +18,7 @@ pub mod admin;
 pub mod app;
 pub mod authenticator;
 mod bp;
+mod compress;
 mod error;
 mod gate;
 mod logger;

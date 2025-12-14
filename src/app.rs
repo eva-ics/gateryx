@@ -30,6 +30,7 @@ impl AppClientKind {
     }
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -43,6 +44,8 @@ pub struct Config {
     #[serde(default)]
     pub hosts: Vec<String>,
     pub remote: String,
+    #[serde(default)]
+    pub compress: bool,
     #[serde(default)]
     pub client: AppClientKind,
     #[serde(default = "crate::util::default_timeout")]

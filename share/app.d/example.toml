@@ -6,6 +6,18 @@ name = "Example App"
 hosts = ["example.domain.local"]
 # Remote target to connect to
 remote = "http://192.168.1.10:8080/"
+# Compress target responses (brotli)
+# The compression is applied automatically to all data.
+# Exceptions:
+# - image/* (except image/svg, image/svg+xml)
+# - video/*
+# - audio/*
+# - application/zip
+# - application/gzip
+# - application/x-gzip
+# - application/x-7z-compressed
+# - application/x-rar-compressed
+compress = true
 # Client protocol to use, http1.0 for HTTP/1.0, http1 for HTTP/1.1 (default),
 # http2 for HTTP/2
 #

@@ -1,4 +1,4 @@
-use std::{io::Cursor, mem, net::IpAddr, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, io::Cursor, mem, net::IpAddr, sync::Arc, time::Duration};
 
 use http::{HeaderValue, Method, header, uri::PathAndQuery};
 use http_body_util::{BodyExt as _, Full};
@@ -35,7 +35,7 @@ type UpstreamClient =
 use crate::{
     ByteResponse, DEVELOPER_USER, HByteResult, ListenerConfig, Result, StdError,
     app::Config as AppConfig,
-    bp,
+    bp, compress,
     gate::worker::Context,
     logger::LogRecord,
     rpc::{self, URI_RPC, URI_RPC_ADMIN},
@@ -486,12 +486,24 @@ async fn handle_http_request(
         return Ok(response);
     }
     let (mut parts, body) = request.into_parts();
-    parts.uri = remote_uri;
+    parts.uri = remote_uri.clone();
     let mut request = Request::from_parts(parts, body);
     let keep_alive = request
         .headers()
         .get(header::CONNECTION)
         .is_some_and(|v| v == "keep-alive");
+    // get all accept-encoding headers into a set
+    let accept_encodings: BTreeSet<String> = if app.compress {
+        request
+            .headers()
+            .get_all(header::ACCEPT_ENCODING)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|s| s.split(',').map(|s| s.trim().to_lowercase()))
+            .collect()
+    } else {
+        <_>::default()
+    };
     match app.client {
         crate::app::AppClientKind::Http0 => {
             if http2 {
@@ -526,7 +538,8 @@ async fn handle_http_request(
             }
             // rewrite location header with ME
             util::rewrite_location_header(&mut parts.headers, &original_host, with_tls);
-            let boxed_body = body.map_err(|e| Box::new(e) as StdError).boxed();
+            let boxed_body =
+                compress::process_body(&accept_encodings, &remote_uri, &mut parts.headers, body);
             Response::from_parts(parts, boxed_body)
         }
         Ok(Err(e)) => {
