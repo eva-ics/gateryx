@@ -23,6 +23,7 @@ const NO_COMPRESS_MIME: &[&str] = &[
 ];
 const ALWAYS_COMPRESS_MIME: &[&str] = &["image/svg+xml", "image/svg"];
 
+const MIN_COMPRESS_SIZE: u64 = 1024;
 const BUFFER_SIZE: usize = 100 * 1024;
 
 pub fn process_body(
@@ -31,6 +32,17 @@ pub fn process_body(
     headers: &mut HeaderMap,
     body: Incoming,
 ) -> BoxBody<Bytes, StdError> {
+    macro_rules! abort {
+        () => {
+            return body.map_err(|e| Box::new(e) as StdError).boxed();
+        };
+    }
+    if !accept_encodings.contains("br") || headers.contains_key(header::CONTENT_ENCODING) {
+        abort!();
+    }
+    if body.size_hint().lower() < MIN_COMPRESS_SIZE {
+        abort!();
+    }
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -40,20 +52,18 @@ pub fn process_body(
         .unwrap()
         .trim()
         .to_lowercase();
-    if !accept_encodings.contains("br")
-        || headers.contains_key(header::CONTENT_ENCODING)
-        || (!ALWAYS_COMPRESS_MIME.contains(&content_type.as_str())
-            && (NO_COMPRESS_MIME.contains(&content_type.as_str())
-                || NO_COMPRESS_MIME_CLASS.contains(
-                    &content_type
-                        .split('/')
-                        .next()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .as_str(),
-                )))
+    if !ALWAYS_COMPRESS_MIME.contains(&content_type.as_str())
+        && (NO_COMPRESS_MIME.contains(&content_type.as_str())
+            || NO_COMPRESS_MIME_CLASS.contains(
+                &content_type
+                    .split('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .as_str(),
+            ))
     {
-        return body.map_err(|e| Box::new(e) as StdError).boxed();
+        abort!();
     }
     debug!(
         uri = uri.path(),

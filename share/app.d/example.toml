@@ -7,7 +7,7 @@ hosts = ["example.domain.local"]
 # Remote target to connect to
 remote = "http://192.168.1.10:8080/"
 # Compress target responses (brotli)
-# The compression is applied automatically to all data.
+# The compression is applied automatically to all data > 1KB
 # Exceptions:
 # - image/* (except image/svg, image/svg+xml)
 # - video/*
