@@ -26,7 +26,8 @@ const URI_AUTH: &str = "/.gateryx/auth";
 const URI_AUTH_PREFIX: &str = "/.gateryx/auth/";
 const URI_AUTH_CAPTCHA: &str = "/.gateryx/auth/captcha";
 
-const KEEP_ALIVE: HeaderValue = HeaderValue::from_static("keep-alive");
+const CONNECTION_CLOSE: HeaderValue = HeaderValue::from_static("close");
+const CONNECTION_KEEP_ALIVE: HeaderValue = HeaderValue::from_static("keep-alive");
 
 type UpstreamClient =
     Arc<Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Incoming>>;
@@ -498,7 +499,9 @@ async fn handle_http_request(
             }
             // remove unsafe http/1.1 headers
             request.headers_mut().remove(header::ACCEPT_ENCODING);
-            request.headers_mut().remove(header::CONNECTION);
+            request
+                .headers_mut()
+                .insert(header::CONNECTION, CONNECTION_CLOSE.clone());
         }
         crate::app::AppClientKind::Http1 => {
             if http2 {
@@ -517,7 +520,9 @@ async fn handle_http_request(
                 parts.headers.remove(header::CONNECTION);
             } else if keep_alive {
                 // preserve keep-alive for http/1.1 clients
-                parts.headers.insert(header::CONNECTION, KEEP_ALIVE.clone());
+                parts
+                    .headers
+                    .insert(header::CONNECTION, CONNECTION_KEEP_ALIVE.clone());
             }
             // rewrite location header with ME
             util::rewrite_location_header(&mut parts.headers, &original_host, with_tls);
