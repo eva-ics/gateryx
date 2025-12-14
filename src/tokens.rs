@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use crate::{
     ConfigCheckIssue, Error, Result,
@@ -15,7 +18,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-const TOKEN_COOKIE: &str = "gateryx_auth_token";
+pub const TOKEN_COOKIE: &str = "gateryx_auth_token";
+pub static TOKEN_COOKIE_WITH_EQ: LazyLock<String> = LazyLock::new(|| format!("{}=", TOKEN_COOKIE));
 const JWKS_PATH: &str = "/.well-known/jwks.json";
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]

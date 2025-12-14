@@ -40,7 +40,7 @@ use crate::{
     rpc::{self, URI_RPC, URI_RPC_ADMIN},
     tokens,
     util::{
-        self, downgrade_to_http1, http_internal_server_error, http_response, resolve_host,
+        self, downgrade_to_http11, http_internal_server_error, http_response, resolve_host,
         synth_sleep,
     },
     vapp::VirtualApp,
@@ -494,7 +494,7 @@ async fn handle_http_request(
     match app.client {
         crate::app::AppClientKind::Http0 => {
             if http2 {
-                downgrade_to_http1(&mut request);
+                downgrade_to_http11(&mut request, false);
             }
             // remove unsafe http/1.1 headers
             request.headers_mut().remove(header::ACCEPT_ENCODING);
@@ -502,7 +502,7 @@ async fn handle_http_request(
         }
         crate::app::AppClientKind::Http1 => {
             if http2 {
-                downgrade_to_http1(&mut request);
+                downgrade_to_http11(&mut request, true);
             }
         }
         crate::app::AppClientKind::Http2 => {}

@@ -9,11 +9,14 @@ remote = "http://192.168.1.10:8080/"
 # Client protocol to use, http1.0 for HTTP/1.0, http1 for HTTP/1.1 (default),
 # http2 for HTTP/2
 #
+# - when http1.0 client is used:
+#   - no extra headers are inserted (including JWT assertion)
+#   - Accept-Encoding and Connection headers are removed
+#   - the cookie "gateryx_auth_token" is forcibly removed from Cookie header.
+#   - recomended for embedded appliances that do not support HTTP/1.1 properly
+#
 # - when http2 client is used, the request is not downgraded and sent as-is
-# (the listener must be configured to support HTTP/2)
-# - when http1.0 client is used: no extra headers are inserted (including JWT
-# assertion), Accept-Encoding and Connection headers are removed. Recomended for legacy
-# appliances that do not support HTTP/1.1 properly.
+#   (the listener must be configured to support HTTP/2)
 #
 #client = "http1"
 # Path to application icon (relative to the primary configuration file)

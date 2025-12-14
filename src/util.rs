@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{str::FromStr, time::Duration};
 
-use crate::{ByteResponse, Error, Result, StdError};
+use crate::{ByteResponse, Error, Result, StdError, tokens::TOKEN_COOKIE_WITH_EQ};
 use http::{HeaderValue, Request};
 use http_body_util::{BodyExt as _, Full};
 use hyper::{HeaderMap, Response, Uri, body::Incoming};
@@ -136,12 +136,24 @@ pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     None
 }
 
-pub fn downgrade_to_http1(request: &mut Request<Incoming>) {
+pub fn downgrade_to_http11(request: &mut Request<Incoming>, keep_token_cookie: bool) {
     request.version_mut().clone_from(&hyper::Version::HTTP_11);
     // combine cookies
     let mut cookies = vec![];
     for cookie_header in &request.headers().get_all("cookie") {
         if let Ok(s) = cookie_header.to_str() {
+            if !keep_token_cookie {
+                let filtered: Vec<&str> = s
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|c| !c.starts_with(&*TOKEN_COOKIE_WITH_EQ))
+                    .collect();
+                if filtered.is_empty() {
+                    continue;
+                }
+                cookies.push(filtered.join("; "));
+                continue;
+            }
             cookies.push(s.to_owned());
         }
     }
