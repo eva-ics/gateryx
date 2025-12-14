@@ -26,7 +26,7 @@ const URI_AUTH: &str = "/.gateryx/auth";
 const URI_AUTH_PREFIX: &str = "/.gateryx/auth/";
 const URI_AUTH_CAPTCHA: &str = "/.gateryx/auth/captcha";
 
-const CONNECTION_CLOSE: HeaderValue = HeaderValue::from_static("close");
+//const CONNECTION_CLOSE: HeaderValue = HeaderValue::from_static("close");
 const CONNECTION_KEEP_ALIVE: HeaderValue = HeaderValue::from_static("keep-alive");
 
 type UpstreamClient =
@@ -411,7 +411,7 @@ async fn handle_http_request(
     };
     if app.skip_remote_tls_verify {
         upstream_client = if let Some(dangerous) = dangerous_upstream_client {
-            warn!(ip = %remote_ip, host = %original_host, "Using dangerous TLS config to skip remote TLS verification");
+            debug!(ip = %remote_ip, host = %original_host, "Using dangerous TLS config to skip remote TLS verification");
             dangerous
         } else {
             error!(
@@ -501,7 +501,7 @@ async fn handle_http_request(
             request.headers_mut().remove(header::ACCEPT_ENCODING);
             request
                 .headers_mut()
-                .insert(header::CONNECTION, CONNECTION_CLOSE.clone());
+                .insert(header::CONNECTION, CONNECTION_KEEP_ALIVE.clone());
         }
         crate::app::AppClientKind::Http1 => {
             if http2 {

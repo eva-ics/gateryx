@@ -10,7 +10,7 @@ use hyper_util::rt::TokioIo;
 use serde::Deserialize;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::WebSocketConfig};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::{
     ByteResponse, StdError,
@@ -197,7 +197,7 @@ async fn proxy_ws_with_headers(
     );
     info!(ip=%remote_ip, upstream_uri, "Proxying WebSocket to upstream",);
     if app.skip_remote_tls_verify {
-        warn!(ip = %remote_ip, upstream_uri, "Using dangerous TLS config to skip remote TLS verification");
+        debug!(ip = %remote_ip, upstream_uri, "Using dangerous TLS config to skip remote TLS verification");
     }
 
     let mut req_builder = Request::builder().method("GET").uri(upstream_uri);
