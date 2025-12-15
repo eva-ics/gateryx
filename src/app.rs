@@ -7,6 +7,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use url::Url;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{ConfigCheckIssue, Error, Result, util::GDuration};
 
@@ -31,13 +32,14 @@ impl AppClientKind {
 }
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub url: String,
+    #[zeroize(skip)]
     pub icon: Option<PathBuf>,
     #[serde(default)]
     pub icon_image: Option<Vec<u8>>,
@@ -47,8 +49,10 @@ pub struct Config {
     #[serde(default)]
     pub compress: bool,
     #[serde(default)]
+    #[zeroize(skip)]
     pub client: AppClientKind,
     #[serde(default = "crate::util::default_timeout")]
+    #[zeroize(skip)]
     pub timeout: GDuration,
     #[serde(default = "crate::util::default_true")]
     pub use_auth: bool,
@@ -56,7 +60,9 @@ pub struct Config {
     pub hidden: bool,
     #[serde(default)]
     pub skip_remote_tls_verify: bool,
+    #[zeroize(skip)]
     pub websocket: Option<crate::ws::Config>,
+    #[zeroize(skip)]
     pub settings: Option<serde_json::Value>,
 }
 

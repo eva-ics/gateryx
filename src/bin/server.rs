@@ -1,9 +1,10 @@
 use std::io::Write as _;
+use std::mem;
 use std::{env, path::PathBuf};
 
 use clap::Parser;
 use fs_err::{read_dir, read_to_string};
-use hyper::Uri;
+use gateryx::app_util::{self, AppConfigEntry};
 use rustls::crypto::CryptoProvider;
 use tracing::{error, info, warn};
 
@@ -55,17 +56,27 @@ fn main() -> Result<()> {
         .unwrap_or_else(|| std::path::Path::new("."));
     let mut check_result = config.check(config_dir);
     let app_d_dir = config_dir.join("app.d");
-    let mut app_configs = Vec::new();
-    let app_config_entries = read_dir(&app_d_dir)?;
-    let mut app_config_paths = Vec::new();
-    for entry in app_config_entries {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("toml") {
-            app_config_paths.push(path);
-        }
+    let mut app_config_entries: Vec<AppConfigEntry> = Vec::new();
+    for app_config in mem::take(&mut config.app) {
+        app_config_entries.push(AppConfigEntry::new(app_config, None, None));
     }
-    app_config_paths.sort();
+    let mut app_config_paths = Vec::new();
+    if app_d_dir.exists() {
+        let app_config_entries = read_dir(&app_d_dir)?;
+        for entry in app_config_entries {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                app_config_paths.push(path);
+            }
+        }
+        app_config_paths.sort();
+    } else if config.app.is_empty() {
+        warn!(
+            app_d = %app_d_dir.display(),
+            "No app.d directory found and no apps configured in the main config"
+        );
+    }
     for path in app_config_paths {
         let Some(app_id) = path.file_stem().and_then(|s| s.to_str()) else {
             error!(path = %path.display(), "Invalid app config file name");
@@ -79,10 +90,10 @@ fn main() -> Result<()> {
                 continue;
             }
         };
-        app_configs.push((app_id.to_owned(), app_config, path));
+        app_config_entries.push(AppConfigEntry::new(app_config, Some(app_id), Some(&path)));
     }
-    for (_, app_config, path) in &app_configs {
-        check_result.extend(app_config.check(config_dir, path));
+    for entry in &app_config_entries {
+        check_result.extend(entry.check(config_dir));
     }
     let mut has_error = false;
     let mut has_warning = false;
@@ -117,68 +128,13 @@ fn main() -> Result<()> {
     let app_map = AppHostMap::default();
     app_map.set_default_app(config.server.default_app.as_deref());
     let mut virtual_app_map = VAppMap::default();
-    let mut primary_system_host = None;
+    let primary_system_host = app_util::add_apps(
+        app_config_entries,
+        config_dir,
+        &app_map,
+        &mut virtual_app_map,
+    );
     // read configs in toml from app.d
-    for (app_id, mut app_config, path) in app_configs {
-        if let Some(v_id) = app_config.url.strip_prefix("gateryx://") {
-            if v_id == gateryx::vapp::System::id() {
-                if primary_system_host.is_none() {
-                    primary_system_host = app_config.hosts.first().cloned();
-                } else {
-                    warn!(name = %app_id, path = %path.display(), "Multiple system virtual apps defined");
-                }
-                let v = gateryx::vapp::System::create(app_config.remote);
-                virtual_app_map.add(app_config.hosts, app_id, v);
-                continue;
-            }
-            if v_id == gateryx::vapp::Plain::id() {
-                let v = gateryx::vapp::Plain::create(app_config.remote, app_config.settings);
-                virtual_app_map.add(app_config.hosts, app_id, v);
-                continue;
-            }
-            warn!(name = %app_id, path = %path.display(), "Unknown virtual app URL scheme");
-            continue;
-        }
-        if app_config.name.is_empty() {
-            app_config.name.clone_from(&app_id);
-        }
-        if app_config.url.is_empty()
-            && let Some(host) = app_config.hosts.first()
-        {
-            app_config.url = format!("https://{}/", host);
-        }
-        if let Some(ref icon) = app_config.icon {
-            let icon_path: PathBuf = if icon.is_absolute() {
-                icon.clone()
-            } else {
-                config_dir.join(icon)
-            };
-            match fs_err::read(&icon_path) {
-                Ok(data) => {
-                    app_config.icon_image = Some(data);
-                }
-                Err(e) => {
-                    warn!(error = %e, path = %icon_path.display(), "Failed to read icon file");
-                }
-            }
-        }
-        match Uri::try_from(&app_config.remote) {
-            Ok(u) => {
-                if u.path() != "/" {
-                    warn!(path = %path.display(), remote = %app_config.remote, "Remote URI must not contain path");
-                }
-            }
-            Err(e) => {
-                error!(error = %e, path = %path.display(), "Invalid remote URI");
-                continue;
-            }
-        }
-        if let Err(e) = app_map.add_sync(&app_id, app_config) {
-            error!(error = %e, path = %path.display(), "Failed to add app config");
-        } else {
-            info!(name = %app_id, path = %path.display(), "Loaded app config");
-        }
-    }
     if !app_map.default_app_present() && config.server.default_app.is_some() {
         warn!(app = config.server.default_app, "Default app not found");
     }

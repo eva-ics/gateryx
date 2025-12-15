@@ -16,6 +16,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod admin;
 pub mod app;
+pub mod app_util;
 pub mod authenticator;
 mod bp;
 mod compress;
@@ -63,6 +64,8 @@ pub struct Config {
     #[zeroize(skip)]
     pub websocket_default: ws::Config,
     pub admin: Option<admin::Config>,
+    #[serde(default)]
+    pub app: Vec<app::Config>,
 }
 
 impl Config {

@@ -109,3 +109,11 @@ key_file = "admin.pem"
 allow = ["127.0.0.1/32"]
 # max time difference in seconds between server and client for admin requests
 #max_time_diff = "5m"
+
+# Web applications can be defined directly in the main configuration file or in
+# "app.d" directory as separate files with ".toml" extension
+#[[app]]
+#url = "gateryx://system"
+#hosts = [ "gate.domain.local" ]
+#remote = "/var/gateryx/www/system"
+
