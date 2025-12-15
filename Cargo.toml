@@ -56,6 +56,7 @@ ldap3 = "0.12.1"
 libc = "0.2.177"
 log = "0.4.27"
 mimalloc = { version = "0.1.48", features = ["secure"], optional = true }
+mini-moka = "0.10.3"
 native-tls = "0.2.14"
 openssl = "0.10.75"
 p256 = { version = "0.13.2", features = ["jwk"] }
@@ -81,7 +82,6 @@ tokio-task-pool = "0.1.6"
 tokio-tungstenite = { version = "0.27.0", features = ["rustls-tls-native-roots"] }
 toml = "0.9.8"
 tracing = { version = "0.1.41", features = ["log"] }
-ttl_cache = "0.5.1"
 url = "2.5.7"
 urlencoding = "2.1.3"
 uuid = { version = "1.18.1", features = ["v4"] }

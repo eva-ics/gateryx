@@ -1,9 +1,8 @@
-use std::{net::IpAddr, time::Duration};
+use std::net::IpAddr;
 
-use parking_lot::Mutex;
+use mini_moka::sync::{Cache, CacheBuilder};
 use serde::Deserialize;
 use tracing::{error, warn};
-use ttl_cache::TtlCache;
 use url::Url;
 use uuid::Uuid;
 pub use webauthn_rs::prelude::{
@@ -44,9 +43,8 @@ pub struct Config {
 
 pub struct Factory {
     webauthn: Webauthn,
-    reg_challenges: Mutex<TtlCache<String, PasskeyRegistration>>,
-    login_challenges: Mutex<TtlCache<Base64UrlSafeData, (IpAddr, DiscoverableAuthentication)>>,
-    timeout: Duration,
+    reg_challenges: Cache<String, PasskeyRegistration>,
+    login_challenges: Cache<Base64UrlSafeData, (IpAddr, DiscoverableAuthentication)>,
     check_login_present: bool,
     max_auth_challenges_per_ip: Option<usize>,
 }
@@ -79,9 +77,12 @@ impl Factory {
         }
         Ok(Self {
             webauthn,
-            reg_challenges: Mutex::new(TtlCache::new(config.max_reg_challenges.into())),
-            login_challenges: Mutex::new(TtlCache::new(config.max_auth_challenges.into())),
-            timeout,
+            reg_challenges: CacheBuilder::new(config.max_reg_challenges.into())
+                .time_to_live(timeout)
+                .build(),
+            login_challenges: CacheBuilder::new(config.max_auth_challenges.into())
+                .time_to_live(timeout)
+                .build(),
             check_login_present: config.check_login_present,
             max_auth_challenges_per_ip: config.max_auth_challenges_per_ip.map(Into::into),
         })
@@ -93,9 +94,8 @@ impl Factory {
         if let Some(max_per_ip) = self.max_auth_challenges_per_ip {
             let count = self
                 .login_challenges
-                .lock()
                 .iter()
-                .filter(|(_, (ip, _))| *ip == remote_ip)
+                .filter(|entry| entry.value().0 == remote_ip)
                 .count();
             if count >= max_per_ip {
                 return Err(Error::access("Too many authentication attempts"));
@@ -106,11 +106,8 @@ impl Factory {
             .start_discoverable_authentication()
             .map_err(Error::failed)?;
         let challenge = challenge_response.public_key.challenge.clone();
-        self.login_challenges.lock().insert(
-            challenge,
-            (remote_ip, passkey_authentication),
-            self.timeout,
-        );
+        self.login_challenges
+            .insert(challenge, (remote_ip, passkey_authentication));
         Ok(challenge_response)
     }
     pub async fn finish_authentication(
@@ -122,9 +119,9 @@ impl Factory {
         let random_sleeper = RandomSleeper::new(100..200);
         let (_, passkey_authentication) = self
             .login_challenges
-            .lock()
-            .remove(challenge)
+            .get(challenge)
             .ok_or_else(|| Error::failed("no authentication in progress"))?;
+        self.login_challenges.invalidate(challenge);
         let (_, cred_id) = self
             .webauthn
             .identify_discoverable_authentication(&auth)
@@ -154,26 +151,25 @@ impl Factory {
             .start_passkey_registration(user_id, user, user, None)
             .map_err(Error::failed)?;
         self.reg_challenges
-            .lock()
-            .insert(user.to_string(), passkey_registration, self.timeout);
+            .insert(user.to_string(), passkey_registration);
         Ok(challenge_response)
     }
     pub async fn finish_registration(
         &self,
-        user: &str,
+        user: String,
         reg: RegisterPublicKeyCredential,
         storage: &dyn Storage,
     ) -> Result<()> {
         let passkey_registration = self
             .reg_challenges
-            .lock()
-            .remove(user)
+            .get(&user)
             .ok_or_else(|| Error::failed("no registration in progress"))?;
+        self.reg_challenges.invalidate(&user);
         let passkey = self
             .webauthn
             .finish_passkey_registration(&reg, &passkey_registration)
             .map_err(Error::failed)?;
-        if let Err(e) = storage.save_passkey(user, passkey).await {
+        if let Err(e) = storage.save_passkey(&user, passkey).await {
             error!(user, error = %e, "Failed to save passkey");
             return Err(e);
         }

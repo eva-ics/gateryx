@@ -469,7 +469,7 @@ impl RpcHandlers for MasterHandlers {
                     return Err(RpcError::method(None));
                 };
                 passkey_factory
-                    .finish_registration(&user, reg, &*self.context.storage)
+                    .finish_registration(user, reg, &*self.context.storage)
                     .await?;
                 Ok(Some(pack_json(true)?))
             }
