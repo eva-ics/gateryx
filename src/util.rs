@@ -65,9 +65,11 @@ pub async fn http_response<T: fmt::Display>(code: u16, text: T) -> ByteResponse 
         .status(code)
         .header("Content-Type", "text/html; charset=utf-8")
         .body(
-            Full::from(text.to_string())
-                .map_err(|e| Box::new(e) as StdError)
-                .boxed(),
+            Full::from(format!(
+                "<html><head><title>{text}</title></head><body><h1>{text}</h1></body></html>"
+            ))
+            .map_err(|e| Box::new(e) as StdError)
+            .boxed(),
         )
         .unwrap()
 }
