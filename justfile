@@ -37,7 +37,7 @@ system-web:
 
 pub-lab: build-x86_64-unknown-linux-gnu copy-lab
 
-pub: deb-amd64 deb-arm64 pub-deb docker pub-docker
+release: deb-amd64 deb-arm64 pub-deb docker pub-docker
 
 docker:
   cd docker && rm -rf _build && mkdir _build
