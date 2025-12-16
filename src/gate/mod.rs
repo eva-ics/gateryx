@@ -7,9 +7,8 @@ use std::{
     time::Duration,
 };
 
-use bincode::{Decode, Encode};
 use busrt::rpc::RpcEvent;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::os::fd::AsRawFd;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
@@ -21,68 +20,47 @@ pub mod master;
 pub mod worker;
 
 #[inline]
-fn pack<T: Encode>(value: T) -> Result<Vec<u8>> {
-    let encoded = bincode::encode_to_vec(value, bincode::config::standard())?;
-    Ok(encoded)
-}
-
-#[inline]
-fn unpack<T>(data: &[u8]) -> Result<T>
-where
-    T: Decode<()>,
-{
-    let (decoded, _) = bincode::decode_from_slice::<T, _>(data, bincode::config::standard())?;
-    Ok(decoded)
-}
-
-#[inline]
-fn pack_json<T: Serialize>(value: T) -> Result<Vec<u8>> {
+pub fn pack<T: Serialize>(value: T) -> Result<Vec<u8>> {
     let encoded = serde_json::to_vec(&value)?;
     Ok(encoded)
+}
+
+#[inline]
+pub fn unpack<T>(data: &[u8]) -> Result<T>
+where
+    T: DeserializeOwned,
+{
+    let decoded = serde_json::from_slice(data)?;
+    Ok(decoded)
 }
 
 trait RpcEventExt {
     fn unpack_payload<T>(&self) -> Result<T>
     where
-        T: Decode<()>;
-    fn unpack_payload_ser<T>(&self) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned;
+        T: DeserializeOwned;
 }
 
 impl RpcEventExt for RpcEvent {
     fn unpack_payload<T>(&self) -> Result<T>
     where
-        T: Decode<()>,
+        T: DeserializeOwned,
     {
         unpack::<T>(self.payload())
     }
-    fn unpack_payload_ser<T>(&self) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        let data = self.payload();
-        let value = serde_json::from_slice::<T>(data)?;
-        Ok(value)
-    }
 }
 
-#[derive(Serialize, Deserialize, Encode, Decode)]
+#[derive(Serialize, Deserialize)]
 pub struct AuthPayload {
     user: String,
-    #[bincode(with_serde)]
     password: Zeroizing<String>,
     captcha_id: Option<String>,
     captcha_str: Option<String>,
 }
 
-#[derive(Encode, Decode)]
+#[derive(Serialize, Deserialize)]
 pub struct ChangePasswordPayload {
-    #[bincode(with_serde)]
     token_str: Zeroizing<String>,
-    #[bincode(with_serde)]
     old_password: Zeroizing<String>,
-    #[bincode(with_serde)]
     new_password: Zeroizing<String>,
 }
 
@@ -95,7 +73,7 @@ impl AuthPayload {
     }
 }
 
-#[derive(Encode, Decode, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub enum AuthResponse {
     Success((String, String, u64)),
     AuthNotEnabled,

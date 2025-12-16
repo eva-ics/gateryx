@@ -13,14 +13,13 @@ use crate::{
     tls::NoCertVerifier,
     ws,
 };
-use bincode::{Decode, Encode};
 use busrt::{
     QoS,
     rpc::{Rpc as _, RpcClient},
 };
 use hyper_rustls::ConfigBuilderExt as _;
 use hyper_staticfile::Static;
-use serde::Serialize;
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::{
     net::{TcpListener, UnixStream},
@@ -36,7 +35,7 @@ use crate::{
     tokens::{self, ClaimsView},
 };
 
-use super::{AuthPayload, AuthResponse, ChangePasswordPayload};
+use super::{AuthPayload, AuthResponse, ChangePasswordPayload, pack, unpack};
 
 pub type Context = Arc<ContextData>;
 
@@ -177,28 +176,10 @@ impl Client {
     }
     async fn call<P, R>(&self, method: ApiMethod, params: P) -> Result<R>
     where
-        P: Encode,
-        R: Decode<()>,
-    {
-        let payload =
-            busrt::borrow::Cow::Owned(bincode::encode_to_vec(params, bincode::config::standard())?);
-        let res = self
-            .inner
-            .as_ref()
-            .unwrap()
-            .rpc
-            .call("m", method.as_str(), payload, QoS::No)
-            .await?;
-        let (result, _) = bincode::decode_from_slice(res.payload(), bincode::config::standard())?;
-        Ok(result)
-    }
-    // TODO remove when all types will be bincode-serializable
-    async fn call_ser<P, R>(&self, method: ApiMethod, params: P) -> Result<R>
-    where
         P: Serialize,
-        R: serde::de::DeserializeOwned,
+        R: DeserializeOwned,
     {
-        let payload = busrt::borrow::Cow::Owned(serde_json::to_vec(&params)?);
+        let payload = busrt::borrow::Cow::Owned(pack(params)?);
         let res = self
             .inner
             .as_ref()
@@ -206,7 +187,7 @@ impl Client {
             .rpc
             .call("m", method.as_str(), payload, QoS::No)
             .await?;
-        let result = serde_json::from_slice(res.payload())?;
+        let result = unpack(res.payload())?;
         Ok(result)
     }
     pub fn is_token_revoked(&self, cv: &ClaimsView) -> impl Future<Output = Result<bool>> {
@@ -258,19 +239,19 @@ impl Client {
         &self,
         token_str: Zeroizing<String>,
     ) -> impl Future<Output = Result<Option<bool>>> {
-        self.call_ser(ApiMethod::PasskeyPresent, token_str)
+        self.call(ApiMethod::PasskeyPresent, token_str)
     }
     pub fn passkey_delete(
         &self,
         token_str: Zeroizing<String>,
     ) -> impl Future<Output = Result<bool>> {
-        self.call_ser(ApiMethod::PasskeyDelete, token_str)
+        self.call(ApiMethod::PasskeyDelete, token_str)
     }
     pub fn passkey_auth_start(
         &self,
         remote_ip: IpAddr,
     ) -> impl Future<Output = Result<passkeys::RequestChallengeResponse>> {
-        self.call_ser(ApiMethod::PasskeyAuthStart, remote_ip)
+        self.call(ApiMethod::PasskeyAuthStart, remote_ip)
     }
     pub fn passkey_auth_finish(
         &self,
@@ -278,27 +259,27 @@ impl Client {
         auth: PublicKeyCredential,
         remote_ip: IpAddr,
     ) -> impl Future<Output = Result<AuthResponse>> {
-        self.call_ser(ApiMethod::PasskeyAuthFinish, (challenge, auth, remote_ip))
+        self.call(ApiMethod::PasskeyAuthFinish, (challenge, auth, remote_ip))
     }
     pub fn passkey_reg_start(
         &self,
         token_str: Zeroizing<String>,
     ) -> impl Future<Output = Result<CreationChallengeResponse>> {
-        self.call_ser(ApiMethod::PasskeyRegStart, token_str)
+        self.call(ApiMethod::PasskeyRegStart, token_str)
     }
     pub fn passkey_reg_finish(
         &self,
         token_str: Zeroizing<String>,
         reg: RegisterPublicKeyCredential,
     ) -> impl Future<Output = Result<bool>> {
-        self.call_ser(ApiMethod::PasskeyRegFinish, (token_str, reg))
+        self.call(ApiMethod::PasskeyRegFinish, (token_str, reg))
     }
     pub fn admin(
         &self,
         req: TransferredRequest,
         remote_ip: IpAddr,
     ) -> impl Future<Output = Result<Value>> {
-        self.call_ser(ApiMethod::Admin, (req, remote_ip))
+        self.call(ApiMethod::Admin, (req, remote_ip))
     }
 }
 

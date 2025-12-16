@@ -38,7 +38,7 @@ use crate::{
     tokens::{self, ClaimsView},
 };
 
-use super::{AuthPayload, AuthResponse, ChangePasswordPayload, RpcEventExt, pack, pack_json};
+use super::{AuthPayload, AuthResponse, ChangePasswordPayload, RpcEventExt, pack};
 
 const CLEANUP_WORKER_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -418,23 +418,23 @@ impl RpcHandlers for MasterHandlers {
                 Ok(Some(pack(res)?))
             }
             "pk.present" => {
-                let token_str: Zeroizing<String> = event.unpack_payload_ser()?;
+                let token_str: Zeroizing<String> = event.unpack_payload()?;
                 if self.context.passkey_factory.is_none() {
-                    return Ok(Some(pack_json(None::<bool>)?));
+                    return Ok(Some(pack(None::<bool>)?));
                 }
                 let user = self.get_user(&token_str).await?;
-                Ok(Some(pack_json(Some(
+                Ok(Some(pack(Some(
                     self.context.storage.has_passkey(&user).await?,
                 ))?))
             }
             "pk.delete" => {
-                let token_str: Zeroizing<String> = event.unpack_payload_ser()?;
+                let token_str: Zeroizing<String> = event.unpack_payload()?;
                 let user = self.get_user(&token_str).await?;
                 self.context.storage.delete_passkey(&user).await?;
-                Ok(Some(pack_json(true)?))
+                Ok(Some(pack(true)?))
             }
             "pk.sa" => {
-                let remote_ip: IpAddr = event.unpack_payload_ser()?;
+                let remote_ip: IpAddr = event.unpack_payload()?;
                 if self.context.token_factory.is_none() {
                     return Err(RpcError::method(None));
                 }
@@ -442,28 +442,28 @@ impl RpcHandlers for MasterHandlers {
                     return Err(RpcError::method(None));
                 };
                 let res = passkey_factory.start_authentication(remote_ip)?;
-                Ok(Some(pack_json(res)?))
+                Ok(Some(pack(res)?))
             }
             "pk.fa" => {
                 let (challenge, auth, remote_ip): (Base64UrlSafeData, PublicKeyCredential, IpAddr) =
-                    event.unpack_payload_ser()?;
+                    event.unpack_payload()?;
                 let res = self
                     .authenticate_passkey(challenge, auth, remote_ip)
                     .await?;
-                Ok(Some(pack_json(res)?))
+                Ok(Some(pack(res)?))
             }
             "pk.sr" => {
-                let token_str: String = event.unpack_payload_ser()?;
+                let token_str: String = event.unpack_payload()?;
                 let user = self.get_user(&token_str).await?;
                 let Some(ref passkey_factory) = self.context.passkey_factory else {
                     return Err(RpcError::method(None));
                 };
                 let res = passkey_factory.start_registration(&user)?;
-                Ok(Some(pack_json(res)?))
+                Ok(Some(pack(res)?))
             }
             "pk.fr" => {
                 let (token_str, reg): (String, RegisterPublicKeyCredential) =
-                    event.unpack_payload_ser()?;
+                    event.unpack_payload()?;
                 let user = self.get_user(&token_str).await?;
                 let Some(ref passkey_factory) = self.context.passkey_factory else {
                     return Err(RpcError::method(None));
@@ -471,7 +471,7 @@ impl RpcHandlers for MasterHandlers {
                 passkey_factory
                     .finish_registration(user, reg, &*self.context.storage)
                     .await?;
-                Ok(Some(pack_json(true)?))
+                Ok(Some(pack(true)?))
             }
             "a.passwd" => {
                 let (p, _remote_ip): (ChangePasswordPayload, IpAddr) = event.unpack_payload()?;
@@ -492,9 +492,9 @@ impl RpcHandlers for MasterHandlers {
             }
             "!" => {
                 let (admin_request, remote_ip): (TransferredRequest, IpAddr) =
-                    event.unpack_payload_ser()?;
+                    event.unpack_payload()?;
                 let res = self.handle_admin_rpc(admin_request, remote_ip).await?;
-                Ok(Some(pack_json(res)?))
+                Ok(Some(pack(res)?))
             }
             _ => Err(RpcError::method(None)),
         }

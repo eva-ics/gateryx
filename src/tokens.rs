@@ -8,7 +8,6 @@ use crate::{
     storage::Storage,
     util::{GDuration, get_cookie},
 };
-use bincode::{Decode, Encode};
 use bma_ts::Timestamp;
 use http::HeaderMap;
 use jsonwebtoken::{DecodingKey, EncodingKey};
@@ -75,14 +74,14 @@ impl Claims {
     }
 }
 
-#[derive(Clone, Encode, Decode)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ClaimsView {
     pub sub: String,
     pub iat: Timestamp,
     pub exp: Timestamp,
 }
 
-#[derive(Encode, Decode)]
+#[derive(Serialize, Deserialize)]
 pub enum ValidationResponse {
     Valid { claims: ClaimsView, token_s: String },
     Invalid,
@@ -91,7 +90,7 @@ pub fn get_token_cookie(headers: &HeaderMap) -> Option<String> {
     get_cookie(headers, TOKEN_COOKIE)
 }
 
-#[derive(Encode, Decode)]
+#[derive(Serialize, Deserialize)]
 pub struct Public {
     issuer_uri: Option<String>,
     jwks_uri: Option<String>,
@@ -100,44 +99,13 @@ pub struct Public {
     jwks: Jwks,
 }
 
-#[derive(Encode, Decode, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Jwks {
     iss: Option<String>,
     sub: Option<String>,
     iat: u64,
-    keys: Vec<JwkEcKeyPub>,
+    keys: Vec<JwkEcKey>,
 }
-
-#[derive(Serialize, Deserialize, Clone)]
-struct JwkEcKeyPub(JwkEcKey);
-
-impl Encode for JwkEcKeyPub {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> std::result::Result<(), bincode::error::EncodeError> {
-        // TODO: Optimize to avoid double serialization (not urgent as serialized only once at
-        // start)
-        let jwk_json = serde_json::to_string(&self.0).map_err(|e| {
-            bincode::error::EncodeError::OtherString(format!("Failed to serialize JWK: {}", e))
-        })?;
-        bincode::Encode::encode(&jwk_json, encoder)
-    }
-}
-
-impl<Context> Decode<Context> for JwkEcKeyPub {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(
-        decoder: &mut D,
-    ) -> std::result::Result<Self, bincode::error::DecodeError> {
-        let jwk_json: String = bincode::Decode::decode(decoder)?;
-        let jwk: JwkEcKey = serde_json::from_str(&jwk_json).map_err(|e| {
-            bincode::error::DecodeError::OtherString(format!("Failed to deserialize JWK: {}", e))
-        })?;
-        Ok(JwkEcKeyPub(jwk))
-    }
-}
-
-bincode::impl_borrow_decode!(JwkEcKeyPub);
 
 impl Public {
     pub fn public_pem(&self) -> &str {
@@ -182,7 +150,7 @@ impl Factory {
                 iss: self.issuer_uri.clone(),
                 sub: self.issuer_uri.clone(),
                 iat: Timestamp::now().as_secs(),
-                keys: vec![JwkEcKeyPub(self.public_key.to_jwk())],
+                keys: vec![self.public_key.to_jwk()],
             },
         }
     }

@@ -1,13 +1,13 @@
 use core::fmt;
 
-use bincode::{Decode, Encode};
+use serde::{Deserialize, Serialize};
 
 pub enum ConfigCheckIssue {
     Warning(String),
     Error(String),
 }
 
-#[derive(thiserror::Error, Debug, Encode, Decode)]
+#[derive(thiserror::Error, Debug, Serialize, Deserialize)]
 pub enum Error {
     #[error("app already exists")]
     AppAlreadyExists,
@@ -40,7 +40,7 @@ impl From<busrt::rpc::RpcError> for Error {
         let Some(data) = e.data() else {
             return Error::Failed("Bus error".to_string());
         };
-        let Ok((e, _)) = bincode::decode_from_slice(data, bincode::config::standard()) else {
+        let Ok(e) = crate::gate::unpack(data) else {
             return Error::Failed("Unreadable bus error".to_string());
         };
         e
@@ -49,7 +49,7 @@ impl From<busrt::rpc::RpcError> for Error {
 
 impl From<Error> for busrt::rpc::RpcError {
     fn from(e: Error) -> Self {
-        let Ok(data) = bincode::encode_to_vec(e, bincode::config::standard()) else {
+        let Ok(data) = crate::gate::pack(&e) else {
             return busrt::rpc::RpcError::internal(None);
         };
         busrt::rpc::RpcError::new(0, Some(data))
@@ -100,18 +100,6 @@ impl From<sqlite::Error> for Error {
 
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
-        Error::InvalidData(e.to_string())
-    }
-}
-
-impl From<bincode::error::EncodeError> for Error {
-    fn from(e: bincode::error::EncodeError) -> Self {
-        Error::InvalidData(e.to_string())
-    }
-}
-
-impl From<bincode::error::DecodeError> for Error {
-    fn from(e: bincode::error::DecodeError) -> Self {
         Error::InvalidData(e.to_string())
     }
 }

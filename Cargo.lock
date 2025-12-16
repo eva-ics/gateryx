@@ -1320,7 +1320,6 @@ dependencies = [
  "async-trait",
  "atomic-timer",
  "bcrypt",
- "bincode",
  "bma-ts",
  "brotli",
  "busrt",
