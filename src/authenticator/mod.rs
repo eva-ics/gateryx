@@ -14,7 +14,7 @@ use crate::{ConfigCheckIssue, Error, Result, bp, passkeys, storage::Storage, tok
 
 pub mod db;
 pub mod htpasswd;
-pub mod ldap;
+//pub mod ldap;
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
@@ -134,7 +134,7 @@ pub enum AuthenticatorConfig {
     Db {
         policy: Option<PasswordPolicy>,
     },
-    Ldap(ldap::Config),
+    //Ldap(ldap::Config),
 }
 
 impl AuthenticatorConfig {
@@ -155,21 +155,21 @@ impl AuthenticatorConfig {
                     )));
                 }
             }
-            AuthenticatorConfig::Ldap(config) => {
-                if let Some(ref ca) = config.ca {
-                    let full_path = if ca.is_absolute() {
-                        ca.clone()
-                    } else {
-                        work_dir.join(ca)
-                    };
-                    if !full_path.exists() {
-                        issues.push(ConfigCheckIssue::Error(format!(
-                            "LDAP CA certificate file does not exist at path: {}",
-                            full_path.display()
-                        )));
-                    }
-                }
-            }
+            //AuthenticatorConfig::Ldap(config) => {
+                //if let Some(ref ca) = config.ca {
+                    //let full_path = if ca.is_absolute() {
+                        //ca.clone()
+                    //} else {
+                        //work_dir.join(ca)
+                    //};
+                    //if !full_path.exists() {
+                        //issues.push(ConfigCheckIssue::Error(format!(
+                            //"LDAP CA certificate file does not exist at path: {}",
+                            //full_path.display()
+                        //)));
+                    //}
+                //}
+            //}
         }
         issues
     }
@@ -184,13 +184,13 @@ impl AuthenticatorConfig {
                     *path = work_dir.join(&*path);
                 }
             }
-            AuthenticatorConfig::Ldap(config) => {
-                if let Some(ref mut ca) = config.ca
-                    && !ca.is_absolute()
-                {
-                    *ca = work_dir.join(&*ca);
-                }
-            }
+            //AuthenticatorConfig::Ldap(config) => {
+                //if let Some(ref mut ca) = config.ca
+                    //&& !ca.is_absolute()
+                //{
+                    //*ca = work_dir.join(&*ca);
+                //}
+            //}
         }
     }
 }
@@ -250,10 +250,10 @@ pub async fn create_authenticator(
             let auth = db::DbAuth::new(db, policy.clone());
             Ok(Box::new(auth))
         }
-        AuthenticatorConfig::Ldap(ldap_config) => {
-            let auth = ldap::LdapAuthenticator::create(ldap_config).await?;
-            Ok(Box::new(auth))
-        }
+        //AuthenticatorConfig::Ldap(ldap_config) => {
+            //let auth = ldap::LdapAuthenticator::create(ldap_config).await?;
+            //Ok(Box::new(auth))
+        //}
     }
 }
 
