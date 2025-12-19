@@ -37,24 +37,27 @@ system-web:
 
 pub-lab: build-x86_64-unknown-linux-gnu copy-lab
 
-release: deb-amd64 deb-arm64 pub-deb docker pub-docker
+release: deb-amd64 deb-arm64 pub-deb pub-docker
 
-docker:
+prepare-docker:
+    docker buildx create \
+      --name mpbuilder \
+      --driver docker-container \
+      --use
+    docker buildx inspect --bootstrap
+    docker run --privileged --rm tonistiigi/binfmt --install all
+
+pub-docker:
   cd docker && rm -rf _build && mkdir _build
   cd docker && cp ../make-deb/gateryx-server-{{ VERSION }}-arm64.deb ./_build/gateryx-server-arm64.deb
   cd docker && cp ../make-deb/gateryx-client-{{ VERSION }}-arm64.deb ./_build/gateryx-client-arm64.deb
   cd docker && cp ../make-deb/gateryx-server-{{ VERSION }}-amd64.deb ./_build/gateryx-server-amd64.deb
   cd docker && cp ../make-deb/gateryx-client-{{ VERSION }}-amd64.deb ./_build/gateryx-client-amd64.deb
-  cd docker && docker build --pull --no-cache -t bmauto/gateryx-arm64:{{ VERSION }} -f ./Dockerfile.arm64 .
-  cd docker && docker build --pull --no-cache -t bmauto/gateryx:{{ VERSION }} -f ./Dockerfile.amd64 .
-  docker tag bmauto/gateryx-arm64:{{ VERSION }} bmauto/gateryx-arm64:latest
-  docker tag bmauto/gateryx:{{ VERSION }} bmauto/gateryx:latest
-
-pub-docker:
-  docker push bmauto/gateryx-arm64:{{ VERSION }}
-  docker push bmauto/gateryx-arm64:latest
-  docker push bmauto/gateryx:{{ VERSION }}
-  docker push bmauto/gateryx:latest
+  cd docker && docker buildx build --platform linux/amd64,linux/arm64 \
+    --pull --no-cache \
+    -t bmauto/gateryx:{{ VERSION }} \
+    -t bmauto/gateryx:latest \
+    --push .
 
 pub-deb:
   cd ~/src/apt/repo && reprepro includedeb stable ~/src/gateryx/make-deb/gateryx-client-{{ VERSION }}-arm64.deb
