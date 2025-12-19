@@ -1,10 +1,8 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::LazyLock,
-};
+use std::path::{Path, PathBuf};
 
 use crate::{
     ConfigCheckIssue, Error, Result,
+    gate::worker::Context,
     storage::Storage,
     util::{GDuration, get_cookie},
 };
@@ -17,8 +15,13 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-pub const TOKEN_COOKIE: &str = "gateryx_auth_token";
-pub static TOKEN_COOKIE_WITH_EQ: LazyLock<String> = LazyLock::new(|| format!("{}=", TOKEN_COOKIE));
+pub const TOKEN_COOKIE_NAME_PREFIX: &str = "gateryx_auth_";
+pub const DEFAULT_TOKEN_COOKIE_NAME: &str = "token";
+
+fn default_token_cookie_name() -> String {
+    DEFAULT_TOKEN_COOKIE_NAME.to_string()
+}
+
 const JWKS_PATH: &str = "/.well-known/jwks.json";
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -29,6 +32,8 @@ pub struct Config {
     #[zeroize(skip)]
     expire: GDuration,
     pub domain: Option<String>,
+    #[serde(default = "default_token_cookie_name")]
+    pub cookie: String,
 }
 
 impl Config {
@@ -86,8 +91,9 @@ pub enum ValidationResponse {
     Valid { claims: ClaimsView, token_s: String },
     Invalid,
 }
-pub fn get_token_cookie(headers: &HeaderMap) -> Option<String> {
-    get_cookie(headers, TOKEN_COOKIE)
+
+pub fn get_token_cookie(headers: &HeaderMap, context: &Context) -> Option<String> {
+    get_cookie(headers, &context.token_cookie_name)
 }
 
 #[derive(Serialize, Deserialize)]

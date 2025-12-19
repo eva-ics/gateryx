@@ -379,7 +379,8 @@ async fn handle_http_request(
                     .await);
                 };
             }
-            let Some(token_str) = tokens::get_token_cookie(request.headers()).map(Zeroizing::new)
+            let Some(token_str) =
+                tokens::get_token_cookie(request.headers(), context).map(Zeroizing::new)
             else {
                 invalid_token!();
             };

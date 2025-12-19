@@ -61,14 +61,14 @@ pub fn add_apps(
                     warn!(path = %path.display(), "Multiple system virtual apps defined");
                 }
                 let v = vapp::System::create(config.remote.clone());
-                info!(path = %path.display(), id = "system", "Loaded virtual app");
-                virtual_app_map.add(config.hosts.clone(), id, v);
+                info!(path = %path.display(), id = v_id, "Loaded virtual app");
+                virtual_app_map.add(config.hosts.clone(), v_id, v);
                 continue;
             }
             if v_id == vapp::Plain::id() {
                 let v = vapp::Plain::create(config.remote.clone(), config.settings.clone());
-                info!(path = %path.display(), id = "plain", "Loaded virtual app");
-                virtual_app_map.add(config.hosts.clone(), id, v);
+                info!(path = %path.display(), id = v_id, "Loaded virtual app");
+                virtual_app_map.add(config.hosts.clone(), v_id, v);
                 continue;
             }
             warn!(path = %path.display(), "Unknown virtual app URL scheme");

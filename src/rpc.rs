@@ -1,4 +1,5 @@
 use core::fmt;
+use std::fmt::Write as _;
 use std::net::IpAddr;
 
 use http::{HeaderMap, Request, Response};
@@ -23,6 +24,18 @@ const JSON_RPC_VERSION: &str = "2.0";
 pub const URI_RPC: &str = "/.gateryx/rpc";
 
 pub const URI_RPC_ADMIN: &str = "/.gateryx/rpc.admin";
+
+#[derive(Deserialize, Default, Copy, Clone)]
+#[serde(rename_all = "lowercase")]
+enum SetAuthCookie {
+    #[default]
+    #[serde(alias = "n")]
+    No,
+    #[serde(alias = "u")]
+    Untrusted,
+    #[serde(alias = "t")]
+    Trusted,
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -135,7 +148,7 @@ impl From<Error> for RpcError {
 }
 
 impl RpcResponse {
-    async fn into_hyper_resonse(self) -> ByteResponse {
+    async fn into_hyper_resonse(self, header_map: Option<HeaderMap>) -> ByteResponse {
         let body = match serde_json::to_vec(&self) {
             Ok(b) => b,
             Err(e) => {
@@ -152,6 +165,11 @@ impl RpcResponse {
         {
             b = b.header("Access-Control-Allow-Origin", "*");
             b = b.header("Access-Control-Allow-Headers", "Content-Type");
+        }
+        if let Some(h) = header_map {
+            for (k, v) in &h {
+                b = b.header(k, v);
+            }
         }
         b.body(
             Full::from(body)
@@ -197,19 +215,70 @@ pub const ERR_CODE_IO: i16 = -32016;
 pub const ERR_ACCESS_DENIED_MORE_DATA_REQUIRED: i16 = -32022;
 
 #[inline]
-fn get_token_str(headers: &HeaderMap) -> Result<Zeroizing<String>> {
-    tokens::get_token_cookie(headers)
+fn get_token_str(headers: &HeaderMap, context: &Context) -> Result<Zeroizing<String>> {
+    tokens::get_token_cookie(headers, context)
         .map(Zeroizing::new)
         .ok_or_else(|| Error::access("Valid authentication token required"))
 }
 
-fn token_value(host: &str, token_str: Zeroizing<String>, exp: u64, context: &Context) -> Value {
-    let domain = if context.host_matches_token_domain(host) {
-        context.token_domain.as_deref()
-    } else {
-        None
-    };
-    serde_json::json!({ "token": token_str, "exp": exp, "domain": domain})
+fn token_cookie_hmap(
+    host: &str,
+    token_str: &Zeroizing<String>,
+    exp: u64,
+    set_auth_cookie: SetAuthCookie,
+    context: &Context,
+) -> Option<HeaderMap> {
+    if matches!(set_auth_cookie, SetAuthCookie::No) {
+        return None;
+    }
+    let domain = context.token_domain_if_matches(host);
+    let mut cookie_str = format!(
+        "{}={}; Path=/; SameSite=Lax",
+        context.token_cookie_name, &**token_str
+    );
+    if let Some(d) = domain {
+        write!(cookie_str, "; Domain={}", d).ok()?;
+    }
+    match set_auth_cookie {
+        SetAuthCookie::Trusted => {
+            if let Ok(exp_utc) = bma_ts::Timestamp::from_secs(exp + 86400).try_into_datetime_utc() {
+                write!(
+                    cookie_str,
+                    "; Expires={}",
+                    exp_utc.format("%a, %d %b %Y %H:%M:%S GMT")
+                )
+                .ok()?;
+            }
+        }
+        SetAuthCookie::Untrusted => {}
+        SetAuthCookie::No => unreachable!(),
+    }
+    let mut header_map = HeaderMap::new();
+    match cookie_str.parse() {
+        Ok(v) => {
+            header_map.append(http::header::SET_COOKIE, v);
+            Some(header_map)
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to create Set-Cookie header for auth token");
+            None
+        }
+    }
+}
+
+fn token_value(
+    host: &str,
+    token_str: Zeroizing<String>,
+    exp: u64,
+    set_auth_cookie: SetAuthCookie,
+    context: &Context,
+) -> (Value, Option<HeaderMap>) {
+    let domain = context.token_domain_if_matches(host);
+    let val = serde_json::json!({ "token": token_str, "exp": exp, "domain": domain});
+    (
+        val,
+        token_cookie_hmap(host, &token_str, exp, set_auth_cookie, context),
+    )
 }
 
 async fn process_auth<F>(
@@ -217,8 +286,9 @@ async fn process_auth<F>(
     auth: F,
     p: Option<&AuthPayload>,
     remote_ip: IpAddr,
+    set_auth_cookie: SetAuthCookie,
     context: &Context,
-) -> Result<Value>
+) -> Result<(Value, Option<HeaderMap>)>
 where
     F: Future<Output = Result<AuthResponse>>,
 {
@@ -234,7 +304,7 @@ where
         Ok(AuthResponse::Success((token_str, user, exp))) => {
             let token_str = Zeroizing::new(token_str);
             info!(ip = %remote_ip, user = %user, "User logged in successfully");
-            Ok(token_value(host, token_str, exp, context))
+            Ok(token_value(host, token_str, exp, set_auth_cookie, context))
         }
         Ok(AuthResponse::AuthNotEnabled) => {
             synth_sleep().await;
@@ -277,30 +347,45 @@ async fn rpc_regular(
     params: Value,
     remote_ip: IpAddr,
     context: &Context,
-) -> Result<Value> {
+) -> Result<(Value, Option<HeaderMap>)> {
+    macro_rules! no_reply {
+        () => {
+            (Value::Null, None)
+        };
+    }
     match method {
         "test" => {
             synth_sleep().await;
-            Ok(serde_json::json!({"ok": true}))
+            Ok((serde_json::json!({"ok": true}), None))
         }
+        "gate.logout" => Ok((
+            Value::Null,
+            token_cookie_hmap(
+                host,
+                &Zeroizing::new(String::new()),
+                0,
+                SetAuthCookie::Trusted,
+                context,
+            ),
+        )),
         "gate.passkey.register.start" => {
-            let token_str = get_token_str(headers)?;
+            let token_str = get_token_str(headers, context)?;
             let res = context.master_client.passkey_reg_start(token_str).await?;
-            Ok(to_value(res)?)
+            Ok((to_value(res)?, None))
         }
         "gate.passkey.register.finish" => {
-            let token_str = get_token_str(headers)?;
+            let token_str = get_token_str(headers, context)?;
             let reg: RegisterPublicKeyCredential = serde_json::from_value(params)?;
             context
                 .master_client
                 .passkey_reg_finish(token_str, reg)
                 .await?;
-            Ok(Value::Null)
+            Ok(no_reply!())
         }
         "gate.passkey.auth.start" => {
             synth_sleep().await;
-            if !context.host_matches_token_domain(host) {
-                return Ok(Value::Null);
+            if context.token_domain_if_matches(host).is_none() {
+                return Ok(no_reply!());
             }
             let challenge = match context.master_client.passkey_auth_start(remote_ip).await {
                 Ok(v) => v,
@@ -309,13 +394,15 @@ async fn rpc_regular(
                     return Err(Error::access("Failed to start passkey authentication"));
                 }
             };
-            Ok(to_value(challenge)?)
+            Ok((to_value(challenge)?, None))
         }
         "gate.passkey.auth.finish" => {
             #[derive(Deserialize)]
             struct Params {
                 challenge: Base64UrlSafeData,
                 auth: PublicKeyCredential,
+                #[serde(default)]
+                set_auth_cookie: SetAuthCookie,
             }
             synth_sleep().await;
             let p: Params = serde_json::from_value(params)?;
@@ -326,21 +413,23 @@ async fn rpc_regular(
                     .passkey_auth_finish(p.challenge, p.auth, remote_ip),
                 None,
                 remote_ip,
+                p.set_auth_cookie,
                 context,
             )
             .await
         }
         "gate.passkey.present" => {
-            let token_str = get_token_str(headers)?;
-            Ok(to_value(
-                context.master_client.passkey_present(token_str).await?,
-            )?)
+            let token_str = get_token_str(headers, context)?;
+            Ok((
+                to_value(context.master_client.passkey_present(token_str).await?)?,
+                None,
+            ))
         }
         "gate.passkey.delete" => {
-            let token_str = get_token_str(headers)?;
+            let token_str = get_token_str(headers, context)?;
             context.master_client.passkey_delete(token_str).await?;
             info!(ip = %remote_ip, "User deleted passkey");
-            Ok(Value::Null)
+            Ok(no_reply!())
         }
         "gate.set_password" => {
             #[derive(Deserialize)]
@@ -348,22 +437,30 @@ async fn rpc_regular(
                 old_password: Zeroizing<String>,
                 new_password: Zeroizing<String>,
             }
-            let token_str = get_token_str(headers)?;
+            let token_str = get_token_str(headers, context)?;
             let p: Params = serde_json::from_value(params)?;
             context
                 .master_client
                 .change_password(token_str, p.old_password, p.new_password, remote_ip)
                 .await?;
             info!(ip = %remote_ip, "User changed password");
-            Ok(Value::Null)
+            Ok(no_reply!())
         }
         "gate.authenticate" => {
-            let p: AuthPayload = serde_json::from_value(params)?;
+            #[derive(Deserialize)]
+            struct Params {
+                #[serde(flatten)]
+                auth: AuthPayload,
+                #[serde(default)]
+                set_auth_cookie: SetAuthCookie,
+            }
+            let p: Params = serde_json::from_value(params)?;
             process_auth(
                 host,
-                context.master_client.authenticate(&p, remote_ip),
-                Some(&p),
+                context.master_client.authenticate(&p.auth, remote_ip),
+                Some(&p.auth),
                 remote_ip,
+                p.set_auth_cookie,
                 context,
             )
             .await
@@ -451,23 +548,23 @@ pub(crate) async fn handle(
         Err(e) => {
             error!(ip = %remote_ip, error = %e, "Failed to parse RPC request");
             let response = RpcResponse::new_error(Value::Null, e);
-            return Ok(response.into_hyper_resonse().await);
+            return Ok(response.into_hyper_resonse(None).await);
         }
     };
     let RpcRequest {
         id, method, params, ..
     } = rpc_request;
     match rpc_regular(&host, &parts.headers, &method, params, remote_ip, context).await {
-        Ok(response) => {
+        Ok((response, hmap)) => {
             info!(ip = %remote_ip, method = %method, "RPC method call succeeded");
             Ok(RpcResponse::new_result(id, response)
-                .into_hyper_resonse()
+                .into_hyper_resonse(hmap)
                 .await)
         }
         Err(e) => {
             error!(ip = %remote_ip, method = %method, error = %e, "RPC method call failed");
             let response = RpcResponse::new_error(id, e);
-            Ok(response.into_hyper_resonse().await)
+            Ok(response.into_hyper_resonse(None).await)
         }
     }
 }

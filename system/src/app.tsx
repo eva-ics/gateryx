@@ -3,7 +3,7 @@ import { engine } from "./components/Engine.tsx";
 import ModalDialog from "./components/ModalDialog.tsx";
 import { startRegistration } from "@simplewebauthn/browser";
 
-const TOKEN_COOKIE_NAME = "gateryx_auth_token";
+//const TOKEN_COOKIE_NAME = "gateryx_auth_token";
 
 function reloadPage() {
   const url = new URL(window.location.href);
@@ -208,7 +208,7 @@ const PasskeyBtn = ({
 };
 
 export const App = () => {
-  const [appDomain, setAppDomain] = useState<string | null>(null);
+  //const [appDomain, setAppDomain] = useState<string | null>(null);
   const [apps, setApps] = useState<AppInfo[] | null>(null);
   const [hasPasskey, setHasPasskey] = useState<boolean | null>(null);
   const [force, forcePasskeyUpdate] = useReducer((x) => x + 1, 0);
@@ -231,7 +231,7 @@ export const App = () => {
     fetch(`${engine.api_uri}/.gateryx/system/apps.json`)
       .then((r) => r.json())
       .then((r) => {
-        setAppDomain(r.domain);
+        //setAppDomain(r.domain);
         setApps(r.apps);
       })
       .catch(() => {
@@ -239,15 +239,22 @@ export const App = () => {
           reloadPage();
         }, 500);
       });
-  }, [setAppDomain, setApps]);
+  }, [setApps]);
 
   const logout = () => {
-    let domain = "";
-    if (appDomain) {
-      domain = `; domain=.${appDomain}`;
-    }
-    document.cookie = `${TOKEN_COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/${domain}`;
-    reloadPage();
+    engine.call("gate.logout").catch((err) => {
+      console.error("Logout failed:", err);
+    });
+    // reload page after a second
+    setTimeout(() => {
+      reloadPage();
+    }, 1000);
+    //let domain = "";
+    //if (appDomain) {
+    //domain = `; domain=.${appDomain}`;
+    //}
+    //document.cookie = `${TOKEN_COOKIE_NAME}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/${domain}`;
+    //reloadPage();
     return false;
   };
 
@@ -271,7 +278,7 @@ export const App = () => {
             hasPasskey={hasPasskey}
             forcePasskeyUpdate={forcePasskeyUpdate}
           />
-          <a onClick={logout} href="/" className="btn outline">
+          <a onClick={logout} href="#" className="btn outline">
             Logout
           </a>
         </div>

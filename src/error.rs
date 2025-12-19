@@ -37,7 +37,7 @@ pub enum Error {
 
 impl From<busrt::rpc::RpcError> for Error {
     fn from(e: busrt::rpc::RpcError) -> Self {
-        let Some(data) = e.data() else {
+        let Some(data) = e.data().filter(|d| !d.is_empty()) else {
             return Error::Failed("Bus error".to_string());
         };
         let Ok(e) = crate::gate::unpack(data) else {

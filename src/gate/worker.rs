@@ -11,6 +11,7 @@ use crate::{
         RegisterPublicKeyCredential,
     },
     tls::NoCertVerifier,
+    tokens::TOKEN_COOKIE_NAME_PREFIX,
     ws,
 };
 use busrt::{
@@ -58,13 +59,21 @@ pub struct ContextData {
     pub websocket_config: ws::Config,
     pub development: bool,
     pub master_client: Client,
+    pub token_cookie_name: String,
+    //pub token_cookie_name_with_eq: String,
 }
 
 impl ContextData {
-    pub fn host_matches_token_domain(&self, host: &str) -> bool {
-        self.token_domain_dot_prefixed
+    pub fn token_domain_if_matches(&self, host: &str) -> Option<&str> {
+        if self
+            .token_domain_dot_prefixed
             .as_ref()
             .is_some_and(|d| host.ends_with(d))
+        {
+            self.token_domain.as_deref()
+        } else {
+            None
+        }
     }
 }
 
@@ -350,6 +359,8 @@ pub async fn prepare_privileged(
         websocket_config: config.websocket_default.clone(),
         development: is_developent_mode(),
         master_client: Client::uninitialized(),
+        token_cookie_name: <_>::default(),
+        //token_cookie_name_with_eq: <_>::default(),
     };
     if let Some(ref auth_config) = config.auth {
         context_data
@@ -357,6 +368,12 @@ pub async fn prepare_privileged(
             .clone_from(&auth_config.tokens.domain);
         context_data.token_domain_dot_prefixed =
             auth_config.tokens.domain.as_ref().map(|d| format!(".{d}"));
+        context_data.token_cookie_name = format!(
+            "{}{}",
+            TOKEN_COOKIE_NAME_PREFIX,
+            auth_config.tokens.cookie.clone()
+        );
+        //context_data.token_cookie_name_with_eq = format!("{}=", context_data.token_cookie_name);
         context_data
             .auth_www_static
             .replace(Static::new(&auth_config.www_root));

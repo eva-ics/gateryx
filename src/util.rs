@@ -1,7 +1,7 @@
 use core::fmt;
 use std::{str::FromStr, time::Duration};
 
-use crate::{ByteResponse, Error, Result, StdError, tokens::TOKEN_COOKIE_WITH_EQ};
+use crate::{ByteResponse, Error, Result, StdError, tokens::TOKEN_COOKIE_NAME_PREFIX};
 use http::{HeaderValue, Request};
 use http_body_util::{BodyExt as _, Full};
 use hyper::{HeaderMap, Response, Uri, body::Incoming};
@@ -140,7 +140,8 @@ pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 pub fn downgrade_to_http11(request: &mut Request<Incoming>, keep_token_cookie: bool) {
     request.version_mut().clone_from(&hyper::Version::HTTP_11);
-    for header in &["http2-settings", "te", "transfer-encoding"] {
+    #[allow(clippy::single_element_loop)]
+    for header in &["http2-settings"] {
         request.headers_mut().remove(*header);
     }
     // remove headers starting with ":"
@@ -161,7 +162,7 @@ pub fn downgrade_to_http11(request: &mut Request<Incoming>, keep_token_cookie: b
                 let filtered: Vec<&str> = s
                     .split(';')
                     .map(str::trim)
-                    .filter(|c| !c.starts_with(&*TOKEN_COOKIE_WITH_EQ))
+                    .filter(|c| !c.starts_with(TOKEN_COOKIE_NAME_PREFIX))
                     .collect();
                 if filtered.is_empty() {
                     continue;

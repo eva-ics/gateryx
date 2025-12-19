@@ -1,18 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { engine, parse_svc_message } from "./components/Engine.tsx";
-import { cookies } from "bmat/dom";
+//import { cookies } from "bmat/dom";
 import type { EngineError, SvcMessage } from "./components/Engine.tsx";
 
 import { startAuthentication } from "@simplewebauthn/browser";
 
-const TOKEN_COOKIE_NAME = "gateryx_auth_token";
+//const TOKEN_COOKIE_NAME = "gateryx_auth_token";
 
 enum AppStateKind {
   LoginForm = "login_form",
   Login = "login"
 }
 
+/*
 const setToken = (res: any, remember: boolean) => {
   const token = res.token;
   let expires = "";
@@ -25,6 +26,11 @@ const setToken = (res: any, remember: boolean) => {
     domain = `; Domain=${res.domain}`;
   }
   document.cookie = `${TOKEN_COOKIE_NAME}=${token}${expires}${domain}; Path=/; SameSite=Lax`;
+  redirectToTarget();
+};
+*/
+
+const redirectToTarget = () => {
   const params = new URLSearchParams(window.location.search);
   const r = params.get("r");
   const r_decoded = r ? decodeURIComponent(r) : null;
@@ -38,7 +44,13 @@ const setToken = (res: any, remember: boolean) => {
 };
 
 const fillPasskey = async () => {
-  const opts = await engine.call("gate.passkey.auth.start", {});
+  let opts;
+  try {
+    opts = await engine.call("gate.passkey.auth.start", {});
+  } catch (e) {
+    console.warn("Passkey auth start failed:", e);
+    return;
+  }
   console.log("Starting passkey lookup");
   const challenge = opts?.publicKey?.challenge;
   if (!challenge) {
@@ -49,11 +61,12 @@ const fillPasskey = async () => {
     useBrowserAutofill: true
   });
   console.log("Passkey auth:", auth);
-  const res = await engine.call("gate.passkey.auth.finish", {
+  await engine.call("gate.passkey.auth.finish", {
     challenge,
-    auth
+    auth,
+    set_auth_cookie: "t"
   });
-  setToken(res, true);
+  redirectToTarget();
 };
 
 interface AppState {
@@ -81,9 +94,9 @@ export const App = () => {
     remember: false
   });
 
-  useEffect(() => {
-    cookies.erase(TOKEN_COOKIE_NAME, "/");
-  }, [app_state, engine]);
+  //useEffect(() => {
+    //cookies.erase(TOKEN_COOKIE_NAME, "/");
+  //}, [app_state, engine]);
 
   switch (app_state.state) {
     case AppStateKind.Login:
@@ -166,7 +179,8 @@ const CredsForm = ({
       setAppState({ state: AppStateKind.Login });
       const payload = {
         user: form.username,
-        password: form.password
+        password: form.password,
+        set_auth_cookie: form.remember ? "t" : "u"
       };
       if (form.captcha_id && form.captcha_str) {
         (payload as any).captcha_id = form.captcha_id;
@@ -174,8 +188,8 @@ const CredsForm = ({
       }
       engine
         .call("gate.authenticate", payload)
-        .then((result) => {
-          setToken(result, form.remember);
+        .then(() => {
+          redirectToTarget();
         })
         .catch((err: EngineError) => {
           const process_svg_msg = (sm: SvcMessage) => {
