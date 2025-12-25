@@ -463,6 +463,9 @@ async fn handle_http_request(
             && let Ok(s) = sub.parse()
         {
             request.headers_mut().insert("X-Gateryx-User", s);
+            request
+                .headers_mut()
+                .insert("X-Real-IP", remote_ip.to_string().parse().unwrap());
         }
         insert_jwt_assertion(jwt_token.as_deref(), &mut request);
     }
