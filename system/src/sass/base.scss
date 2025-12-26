@@ -24,6 +24,7 @@ base
 
 .copy-btn {
   margin-left: 8px;
+  cursor: pointer;
 }
 
 .footer .btn {
@@ -141,6 +142,11 @@ a:visited {
 
 .error {
   color: #ff4c4c;
+  font-weight: bold;
+}
+
+.success {
+  color: #4caf50;
   font-weight: bold;
 }
 

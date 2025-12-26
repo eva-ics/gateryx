@@ -43,6 +43,7 @@ const AudTokenBtn = ({ apps }: { apps: AppInfo[] }) => {
   const [appToken, setAppToken] = useState<string | null>(null);
   const inputRef = useRef<HTMLSelectElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [formData, setFormData] = useState<{
     app: string;
     exp: number;
@@ -76,6 +77,7 @@ const AudTokenBtn = ({ apps }: { apps: AppInfo[] }) => {
 
   const issuedTokenForm = (
     <div>
+      <div className="success">{success}</div>
       <div className="form-group">
         <label htmlFor="issuedToken">Application Token</label>
         <div style={{ wordBreak: "break-all" }}>
@@ -85,6 +87,7 @@ const AudTokenBtn = ({ apps }: { apps: AppInfo[] }) => {
             onClick={() => {
               if (appToken) {
                 copyTextClipboard(appToken);
+                setSuccess("Token copied to clipboard");
               }
             }}
             title="Copy to clipboard"
@@ -170,6 +173,7 @@ const AudTokenBtn = ({ apps }: { apps: AppInfo[] }) => {
         className="btn outline"
         onClick={() => {
           setError(null);
+          setSuccess(null);
           setAppToken(null);
           setIsOpen(true);
           setTimeout(() => {
