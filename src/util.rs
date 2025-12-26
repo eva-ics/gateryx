@@ -1,10 +1,11 @@
 use core::fmt;
-use std::{str::FromStr, time::Duration};
+use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
 
 use crate::{ByteResponse, Error, Result, StdError, tokens::TOKEN_COOKIE_NAME_PREFIX};
 use http::{HeaderValue, Request};
 use http_body_util::{BodyExt as _, Full};
 use hyper::{HeaderMap, Response, Uri, body::Incoming};
+use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
@@ -52,6 +53,10 @@ pub fn rewrite_location_header(headers: &mut HeaderMap, original_host: &str, wit
         };
         headers.insert("location", v);
     }
+}
+
+pub fn http_response_forbidden() -> impl Future<Output = ByteResponse> {
+    http_response(403, "Forbidden")
 }
 
 /// # Panics
@@ -385,5 +390,42 @@ impl<'de> Deserialize<'de> for GDuration {
                 Ok(GDuration(dur))
             }
         }
+    }
+}
+
+pub struct AllowRemote {
+    allow: Arc<Vec<IpNetwork>>,
+    empty_ok: bool,
+}
+
+impl AllowRemote {
+    pub fn new(allow: &[IpNetwork]) -> Self {
+        Self {
+            allow: allow.to_owned().into(),
+            empty_ok: false,
+        }
+    }
+    pub fn with_empty_ok(mut self) -> Self {
+        self.empty_ok = true;
+        self
+    }
+}
+
+impl Clone for AllowRemote {
+    fn clone(&self) -> Self {
+        Self {
+            allow: Arc::clone(&self.allow),
+            empty_ok: self.empty_ok,
+        }
+    }
+}
+
+impl AllowRemote {
+    #[inline]
+    pub fn verify_ip(&self, remote_ip: IpAddr) -> bool {
+        if self.allow.is_empty() && self.empty_ok {
+            return true;
+        }
+        self.allow.iter().any(|net| net.contains(remote_ip))
     }
 }

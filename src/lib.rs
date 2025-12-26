@@ -6,6 +6,7 @@ use std::{
 use http::Response;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
+use ipnetwork::IpNetwork;
 use serde::Deserialize;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -169,6 +170,9 @@ pub struct ListenerConfig {
     #[serde(default)]
     #[zeroize(skip)]
     pub protocol: L7Protocol,
+    #[zeroize(skip)]
+    #[serde(default)]
+    pub allow: Vec<IpNetwork>,
 }
 
 impl ListenerConfig {

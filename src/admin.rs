@@ -116,25 +116,6 @@ impl TransferredRequest {
     }
 }
 
-pub struct AllowRemote {
-    allow: Vec<IpNetwork>,
-}
-
-impl AllowRemote {
-    pub fn new(allow: &[IpNetwork]) -> Self {
-        Self {
-            allow: allow.to_owned(),
-        }
-    }
-}
-
-impl AllowRemote {
-    #[inline]
-    pub fn verify_ip(&self, remote_ip: IpAddr) -> bool {
-        self.allow.iter().any(|net| net.contains(remote_ip))
-    }
-}
-
 pub struct Auth {
     secret_key: SecretKey,
     signature_params: HttpSignatureParams,

@@ -41,8 +41,8 @@ use crate::{
     rpc::{self, URI_RPC, URI_RPC_ADMIN},
     tokens,
     util::{
-        self, downgrade_to_http11, http_internal_server_error, http_response, resolve_host,
-        synth_sleep,
+        self, AllowRemote, downgrade_to_http11, http_internal_server_error, http_response,
+        http_response_forbidden, resolve_host, synth_sleep,
     },
     vapp::VirtualApp,
     ws,
@@ -337,7 +337,7 @@ async fn invalid_token_result(
             )
             .unwrap();
     }
-    return http_response(403, "").await;
+    http_response_forbidden().await
 }
 
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
@@ -350,10 +350,16 @@ async fn handle_http_request(
     worker_pool: TaskPool,
     with_tls: bool,
     http2: bool,
+    allow: AllowRemote,
     force_app: Option<Arc<String>>,
     token_sub: &mut Option<String>,
 ) -> HByteResult {
     debug!(ip = %remote_ip, request = ?request);
+    if !allow.verify_ip(remote_ip) {
+        warn!(ip = %remote_ip, "Remote IP not allowed");
+        synth_sleep().await;
+        return Ok(http_response_forbidden().await);
+    }
     if let Some(ref extractor) = context.meta_extractor {
         let meta = extractor.extract(&request, remote_ip);
         if let Some(ref logger) = context.meta_logger {
@@ -641,6 +647,7 @@ async fn handle_stream<S>(
     context: Context,
     with_tls: bool,
     http2: bool,
+    allow: AllowRemote,
     force_app: Option<Arc<String>>,
 ) where
     S: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
@@ -680,6 +687,7 @@ async fn handle_stream<S>(
                 let context = context.clone();
                 let worker_pool = worker_pool.clone();
                 let force_app = force_app.clone();
+                let allow = allow.clone();
                 async move {
                     let log_record = if context.http_logger.is_some() {
                         Some(LogRecord::new(ip, &req, with_tls))
@@ -696,6 +704,7 @@ async fn handle_stream<S>(
                         worker_pool,
                         with_tls,
                         http2,
+                        allow,
                         force_app,
                         &mut token_sub,
                     )
@@ -790,6 +799,7 @@ pub async fn handle_listener(
     let worker_pool = TaskPool(Arc::new(tokio_task_pool::Pool::bounded(
         config.max_workers.into(),
     )));
+    let allow = AllowRemote::new(&config.allow).with_empty_ok();
     tokio::spawn({
         let client_pool = client_pool.clone();
         let worker_pool = worker_pool.clone();
@@ -820,6 +830,7 @@ pub async fn handle_listener(
         info!(ip = %client.ip(), "Accepted connection from client");
         let worker_pool = worker_pool.clone();
         let context = context.clone();
+        let allow = allow.clone();
         if let Err(e) = client_pool
             .spawn({
                 let context = context.clone();
@@ -835,6 +846,7 @@ pub async fn handle_listener(
                                     context,
                                     true,
                                     http2,
+                                    allow,
                                     force_app,
                                 )
                                 .await;
@@ -854,6 +866,7 @@ pub async fn handle_listener(
                             context,
                             false,
                             http2,
+                            allow,
                             force_app,
                         )
                         .await;

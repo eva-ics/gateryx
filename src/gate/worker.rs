@@ -2,7 +2,7 @@ use std::{net::IpAddr, os::fd::FromRawFd as _, sync::Arc, time::Duration};
 
 use crate::{
     AppHostMap, Config, Result, VAppMap,
-    admin::{self, TransferredRequest},
+    admin::TransferredRequest,
     is_developent_mode,
     logger::{LogSender, MetaLogSender},
     ml,
@@ -12,6 +12,7 @@ use crate::{
     },
     tls::NoCertVerifier,
     tokens::TOKEN_COOKIE_NAME_PREFIX,
+    util::AllowRemote,
     ws,
 };
 use busrt::{
@@ -43,7 +44,7 @@ pub type Context = Arc<ContextData>;
 pub struct ContextData {
     pub app_map: AppHostMap,
     pub virtual_app_map: Arc<VAppMap>,
-    pub admin_allow_remote: Option<admin::AllowRemote>,
+    pub admin_allow_remote: Option<AllowRemote>,
     pub auth_www_static: Option<Static>,
     pub primary_host: Option<String>,
     pub token_domain: Option<String>,
@@ -359,7 +360,7 @@ pub async fn prepare_privileged(
         admin_allow_remote: config
             .admin
             .as_ref()
-            .map(|admin_config| admin::AllowRemote::new(&admin_config.allow)),
+            .map(|admin_config| AllowRemote::new(&admin_config.allow)),
         primary_host: primary_system_host.clone(),
         auth_www_static: None,
         token_domain: None,
