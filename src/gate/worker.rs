@@ -83,10 +83,12 @@ enum ApiMethod {
     WriteMetaLog,
     IsTokenRevoked,
     ValidateToken,
+    IssueAppsToken,
     TokenFactoryPublic,
     GetCaptchaSecret,
     Authenticate,
     ChangePassword,
+    UserInvalidate,
     PasskeyPresent,
     PasskeyDelete,
     PasskeyAuthStart,
@@ -103,10 +105,12 @@ impl ApiMethod {
             ApiMethod::WriteMetaLog => "lm",
             ApiMethod::IsTokenRevoked => "t.rev",
             ApiMethod::ValidateToken => "t.v",
+            ApiMethod::IssueAppsToken => "t.iapps",
             ApiMethod::TokenFactoryPublic => "t.public",
             ApiMethod::GetCaptchaSecret => "c.get",
             ApiMethod::Authenticate => "a",
             ApiMethod::ChangePassword => "a.passwd",
+            ApiMethod::UserInvalidate => "a.inv",
             ApiMethod::PasskeyPresent => "pk.present",
             ApiMethod::PasskeyDelete => "pk.delete",
             ApiMethod::PasskeyAuthStart => "pk.sa",
@@ -205,11 +209,23 @@ impl Client {
     pub fn validate_token<'a>(
         &'a self,
         token_str: &'a str,
+        allow_app_tokens: bool,
     ) -> impl Future<Output = Result<tokens::ValidationResponse>> + 'a {
-        self.call(ApiMethod::ValidateToken, token_str)
+        self.call(ApiMethod::ValidateToken, (token_str, allow_app_tokens))
     }
     pub fn token_factory_public(&self) -> impl Future<Output = Result<Option<tokens::Public>>> {
         self.call(ApiMethod::TokenFactoryPublic, ())
+    }
+    pub fn issue_apps_token<'a>(
+        &self,
+        token_str: &'a str,
+        aud: Vec<&'a str>,
+        exp: u64,
+    ) -> impl Future<Output = Result<Zeroizing<String>>> {
+        self.call(ApiMethod::IssueAppsToken, (token_str, aud, exp))
+    }
+    pub fn invalidate(&self, token_str: Zeroizing<String>) -> impl Future<Output = Result<bool>> {
+        self.call(ApiMethod::UserInvalidate, token_str)
     }
     pub fn get_captcha_secret(
         &self,
@@ -231,7 +247,7 @@ impl Client {
         old_password: Zeroizing<String>,
         new_password: Zeroizing<String>,
         remote_ip: IpAddr,
-    ) -> impl Future<Output = Result<()>> {
+    ) -> impl Future<Output = Result<bool>> {
         self.call(
             ApiMethod::ChangePassword,
             (

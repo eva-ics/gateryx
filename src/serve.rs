@@ -99,17 +99,33 @@ enum ServeApp {
 }
 
 impl ServeApp {
+    fn allow_tokens(&self) -> bool {
+        match self {
+            ServeApp::App(app) => app.allow_tokens,
+            ServeApp::VirtualApp(_) => false,
+        }
+    }
     fn use_auth(&self) -> bool {
         match self {
             ServeApp::App(app) => app.use_auth,
             ServeApp::VirtualApp(_) => true,
         }
     }
+    fn hosts(&self) -> Vec<&str> {
+        match self {
+            ServeApp::App(app) => app.hosts.iter().map(String::as_str).collect(),
+            ServeApp::VirtualApp(_) => vec![],
+        }
+    }
     async fn resolve_force(context: &Context, app_name: &str) -> Option<Self> {
         if let Some(v) = context.virtual_app_map.get_by_id(app_name) {
             Some(ServeApp::VirtualApp(v))
         } else {
-            context.app_map.get_by_id(app_name).await.map(ServeApp::App)
+            context
+                .app_map
+                .get_by_name(app_name)
+                .await
+                .map(ServeApp::App)
         }
     }
     async fn resolve(
@@ -256,6 +272,7 @@ async fn invalid_token_result(
     remote_ip: IpAddr,
     original_host: &str,
     request: &Request<Incoming>,
+    allow_tokens: bool,
     with_tls: bool,
     context: &Context,
 ) -> ByteResponse {
@@ -283,6 +300,42 @@ async fn invalid_token_result(
             with_tls,
             remote_ip,
         );
+    }
+    if allow_tokens {
+        let user_agent = request
+            .headers()
+            .get(header::USER_AGENT)
+            .and_then(|v| v.to_str().ok());
+        // return basic auth for git and similar clients
+        if user_agent
+            .is_some_and(|ua| ua.contains("git/") || ua.contains("curl/") || ua.contains("Wget/"))
+        {
+            return Response::builder()
+                .status(401)
+                .header(
+                    "WWW-Authenticate",
+                    "Basic realm=\"Gateryx\", charset=\"UTF-8\"",
+                )
+                .body(
+                    Full::from(vec![])
+                        .map_err(|e| Box::new(e) as StdError)
+                        .boxed(),
+                )
+                .unwrap();
+        }
+        // return 401 with WWW-Authenticate header
+        return Response::builder()
+            .status(401)
+            .header(
+                "WWW-Authenticate",
+                "Bearer realm=\"Gateryx\", error=\"invalid_token\"",
+            )
+            .body(
+                Full::from(vec![])
+                    .map_err(|e| Box::new(e) as StdError)
+                    .boxed(),
+            )
+            .unwrap();
     }
     return http_response(403, "").await;
 }
@@ -373,19 +426,40 @@ async fn handle_http_request(
                         remote_ip,
                         &original_host,
                         &request,
+                        app.allow_tokens(),
                         with_tls,
                         context,
                     )
                     .await);
                 };
             }
-            let Some(token_str) =
-                tokens::get_token_cookie(request.headers(), context).map(Zeroizing::new)
-            else {
+            let Some(token_str) = tokens::extract_token_from_headers(
+                request.headers_mut(),
+                app.allow_tokens(),
+                context,
+            )
+            .map(Zeroizing::new) else {
                 invalid_token!();
             };
-            match context.master_client.validate_token(&token_str).await {
+            match context
+                .master_client
+                .validate_token(&token_str, app.allow_tokens())
+                .await
+            {
                 Ok(tokens::ValidationResponse::Valid { token_s, claims: c }) => {
+                    if !c.apps.is_empty() {
+                        let hosts = app.hosts();
+                        if hosts.is_empty() {
+                            error!(ip = %remote_ip,
+                                host = %original_host, "Attempting to access a virtual app with an app-restricted token");
+                            invalid_token!();
+                        } // system app
+                        if !c.apps.iter().any(|a| hosts.contains(&a.as_str())) {
+                            error!(ip = %remote_ip, host = %original_host, aud = ?c.apps,
+                                    host = %original_host, "Token audience does not match app hosts");
+                            invalid_token!();
+                        }
+                    }
                     let sub = c.sub.clone();
                     debug!(ip = %remote_ip, user = %sub, "Valid token");
                     *token_sub = Some(sub);

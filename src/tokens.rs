@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    cmp::max,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     ConfigCheckIssue, Error, Result,
@@ -6,6 +9,7 @@ use crate::{
     storage::Storage,
     util::{GDuration, get_cookie},
 };
+use base64::prelude::*;
 use bma_ts::Timestamp;
 use http::HeaderMap;
 use jsonwebtoken::{DecodingKey, EncodingKey};
@@ -18,11 +22,17 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 pub const TOKEN_COOKIE_NAME_PREFIX: &str = "gateryx_auth_";
 pub const DEFAULT_TOKEN_COOKIE_NAME: &str = "token";
 
+pub const GATERYX_AUTH_HEADER: &str = "X-Gateryx-Authorization";
+
 fn default_token_cookie_name() -> String {
     DEFAULT_TOKEN_COOKIE_NAME.to_string()
 }
 
 const JWKS_PATH: &str = "/.well-known/jwks.json";
+
+fn max_bearer_expire() -> GDuration {
+    GDuration::from_secs(86400 * 365) // 7 days
+}
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
@@ -31,6 +41,9 @@ pub struct Config {
     key_file: PathBuf,
     #[zeroize(skip)]
     expire: GDuration,
+    #[zeroize(skip)]
+    #[serde(default = "max_bearer_expire")]
+    max_bearer_expire: GDuration,
     pub domain: Option<String>,
     #[serde(default = "default_token_cookie_name")]
     pub cookie: String,
@@ -67,6 +80,8 @@ pub struct Claims {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iss: Option<String>,
     pub jti: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
 }
 
 impl Claims {
@@ -75,6 +90,7 @@ impl Claims {
             sub: self.sub.clone(),
             iat: Timestamp::from_secs(self.iat),
             exp: Timestamp::from_secs(self.exp),
+            apps: self.apps.clone(),
         }
     }
 }
@@ -84,6 +100,8 @@ pub struct ClaimsView {
     pub sub: String,
     pub iat: Timestamp,
     pub exp: Timestamp,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -92,7 +110,57 @@ pub enum ValidationResponse {
     Invalid,
 }
 
-pub fn get_token_cookie(headers: &HeaderMap, context: &Context) -> Option<String> {
+pub fn get_token_from_cookie_header(headers: &HeaderMap, context: &Context) -> Option<String> {
+    get_cookie(headers, &context.token_cookie_name)
+}
+
+pub fn extract_token_from_headers(
+    headers: &mut HeaderMap,
+    allow_app_tokens: bool,
+    context: &Context,
+) -> Option<String> {
+    macro_rules! process_auth_header {
+        ($auth_header:expr, $token_str: expr) => {
+            let Ok(auth_str) = $auth_header.to_str() else {
+                continue;
+            };
+            let (auth_kind, auth_value) = match auth_str.split_once(' ') {
+                Some((k, v)) => (k.to_lowercase(), v.trim()),
+                None => continue,
+            };
+            if auth_kind == "bearer" {
+                $token_str = Some(auth_value.to_string());
+            }
+            if auth_kind == "basic" {
+                let Ok(decoded) = BASE64_STANDARD.decode(auth_value) else {
+                    continue;
+                };
+                let Ok(decoded_str) = String::from_utf8(decoded) else {
+                    continue;
+                };
+                if let Some((_, password)) = decoded_str.split_once(':') {
+                    $token_str = Some(password.to_string());
+                }
+            }
+        };
+    }
+    if allow_app_tokens {
+        let mut token_str = None;
+        for auth_header in headers.get_all(GATERYX_AUTH_HEADER) {
+            process_auth_header!(auth_header, token_str);
+        }
+        headers.remove(GATERYX_AUTH_HEADER);
+        if token_str.is_some() {
+            return token_str;
+        }
+        for auth_header in headers.get_all(http::header::AUTHORIZATION) {
+            process_auth_header!(auth_header, token_str);
+        }
+        headers.remove(http::header::AUTHORIZATION);
+        if token_str.is_some() {
+            return token_str;
+        }
+    }
     get_cookie(headers, &context.token_cookie_name)
 }
 
@@ -138,6 +206,7 @@ pub struct Factory {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
     expiration_seconds: u64,
+    max_bearer_expire_seconds: u64,
     issuer_uri: Option<String>,
     jwks_uri: Option<String>,
     public_key: PublicKey,
@@ -201,6 +270,7 @@ impl Factory {
             encoding_key,
             decoding_key,
             expiration_seconds: config.expire.as_secs(),
+            max_bearer_expire_seconds: config.max_bearer_expire.as_secs(),
             issuer_uri: system_host.map(|s| format!("https://{}", s)),
             jwks_uri: system_host.map(|s| format!("https://{}/{}", s, JWKS_PATH)),
             public_key,
@@ -208,17 +278,33 @@ impl Factory {
             openid_configuration,
         })
     }
-    pub fn expiration_seconds(&self) -> u64 {
-        self.expiration_seconds
+    pub fn max_expiration_seconds(&self) -> u64 {
+        max(self.expiration_seconds, self.max_bearer_expire_seconds)
     }
-    pub fn issue<S: AsRef<str>>(&self, sub: S) -> Result<(String, u64)> {
-        let exp = Timestamp::now().as_secs() + self.expiration_seconds;
+    pub fn issue<S: AsRef<str>>(
+        &self,
+        sub: S,
+        apps: Vec<String>,
+        exp: Option<u64>,
+    ) -> Result<(String, u64)> {
+        if !apps.is_empty() {
+            let Some(exp) = exp else {
+                return Err(Error::failed("App tokens must have explicit expiration"));
+            };
+            if exp > self.max_bearer_expire_seconds {
+                return Err(Error::failed(
+                    "App token expiration exceeds maximum allowed",
+                ));
+            }
+        }
+        let exp = Timestamp::now().as_secs() + exp.unwrap_or(self.expiration_seconds);
         let claims = Claims {
             sub: sub.as_ref().to_string(),
             iat: Timestamp::now().as_secs(),
             exp,
             iss: self.issuer_uri.clone(),
             jti: uuid::Uuid::new_v4().to_string(),
+            apps,
         };
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256),
@@ -228,7 +314,12 @@ impl Factory {
         .map_err(|e| Error::crypto(format!("Failed to encode token: {}", e)))?;
         Ok((token, exp))
     }
-    pub async fn validate(&self, token_str: String, storage: &dyn Storage) -> ValidationResponse {
+    pub async fn validate(
+        &self,
+        token_str: String,
+        storage: &dyn Storage,
+        allow_app_tokens: bool,
+    ) -> ValidationResponse {
         let Ok(token) = jsonwebtoken::decode::<Claims>(
             &token_str,
             &self.decoding_key,
@@ -236,6 +327,10 @@ impl Factory {
         ) else {
             return ValidationResponse::Invalid;
         };
+        if !token.claims.apps.is_empty() && !allow_app_tokens {
+            debug!(user = %token.claims.sub, "App token not allowed");
+            return ValidationResponse::Invalid;
+        }
         if self.issuer_uri.as_deref() != token.claims.iss.as_deref() {
             debug!(expected_iss = ?self.issuer_uri, token_iss = ?token.claims.iss, "Token issuer mismatch");
             return ValidationResponse::Invalid;

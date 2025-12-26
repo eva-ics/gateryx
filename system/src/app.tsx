@@ -2,8 +2,11 @@ import { useState, useEffect, useReducer, useRef } from "react";
 import { engine } from "./components/Engine.tsx";
 import ModalDialog from "./components/ModalDialog.tsx";
 import { startRegistration } from "@simplewebauthn/browser";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import { copyTextClipboard } from "bmat/dom";
 
-//const TOKEN_COOKIE_NAME = "gateryx_auth_token";
+const INVALIDATE_WARN =
+  "All sessions including application tokens will be invalidated";
 
 function reloadPage() {
   const url = new URL(window.location.href);
@@ -15,6 +18,7 @@ interface AppInfo {
   display_name?: string;
   has_icon: boolean;
   name: string;
+  allow_tokens: boolean;
   url: string;
 }
 
@@ -31,6 +35,152 @@ const AppIcon = ({ app }: { app: AppInfo }) => {
     const l = (app.display_name || app.name).toUpperCase().charAt(0);
     return <div className="app-icon-text">{l}</div>;
   }
+};
+
+const AudTokenBtn = ({ apps }: { apps: AppInfo[] }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isResultOpen, setIsResultOpen] = useState(false);
+  const [appToken, setAppToken] = useState<string | null>(null);
+  const inputRef = useRef<HTMLSelectElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [formData, setFormData] = useState<{
+    app: string;
+    exp: number;
+  }>({
+    app: "",
+    exp: 30
+  });
+
+  const issueAudToken = () => {
+    if (!formData.app) {
+      return;
+    }
+    engine
+      .call("gate.issue_aud_token", {
+        app: formData.app,
+        exp: formData.exp * 86400
+      })
+      .then((res) => {
+        setIsOpen(false);
+        if (!res?.aud_token) {
+          setError("Failed to issue application token.");
+          return;
+        }
+        setAppToken(res.aud_token);
+        setIsResultOpen(true);
+      })
+      .catch((e) => {
+        setError(e.message || "Failed to issue application token.");
+      });
+  };
+
+  const issuedTokenForm = (
+    <div>
+      <div className="form-group">
+        <label htmlFor="issuedToken">Application Token</label>
+        <div style={{ wordBreak: "break-all" }}>
+          <small>{appToken}</small>
+          <button
+            className="btn copy-btn"
+            onClick={() => {
+              if (appToken) {
+                copyTextClipboard(appToken);
+              }
+            }}
+            title="Copy to clipboard"
+          >
+            <ContentCopyIcon />
+          </button>
+        </div>
+      </div>
+      <div className="form-group">
+        <small>
+          Warning: This token will only be shown once. Make sure to copy and
+          store it securely.
+        </small>
+      </div>
+    </div>
+  );
+
+  const issueAudTokenForm = (
+    <div>
+      <div className="error">{error}</div>
+      <div className="form-group">
+        <label htmlFor="app">Application</label>
+        <select
+          ref={inputRef}
+          id="app"
+          name="app"
+          className="form-control"
+          onChange={(e) => {
+            setError(null);
+            setFormData({ ...formData, app: e.target.value });
+          }}
+        >
+          <option value="">-- Select an application --</option>
+          {apps
+            .filter((app) => {
+              return app.allow_tokens;
+            })
+            .map((app, i) => (
+              <option key={i} value={app.name}>
+                {app.display_name || app.name}
+              </option>
+            ))}
+        </select>
+      </div>
+      <div className="form-group">
+        <label htmlFor="expDays">Expires in (days)</label>
+        <input
+          type="text"
+          id="expDays"
+          name="expDays"
+          className="form-control"
+          value={formData.exp}
+          onChange={(e) => {
+            setError(null);
+            const num = parseInt(e.target.value, 10);
+            if (isNaN(num) || num < 0) {
+              setError("Expiration must be a positive number.");
+              return;
+            }
+            setFormData({ ...formData, exp: num });
+          }}
+        />
+      </div>
+    </div>
+  );
+  return (
+    <>
+      <ModalDialog
+        title={`Issue application token`}
+        content={issueAudTokenForm}
+        open={isOpen}
+        onClose={() => setIsOpen(false)}
+        onConfirm={issueAudToken}
+      />
+      <ModalDialog
+        title={`Application token issued`}
+        content={issuedTokenForm}
+        open={isResultOpen}
+        onClose={() => setIsResultOpen(false)}
+      />
+      <a
+        href="#"
+        className="btn outline"
+        onClick={() => {
+          setError(null);
+          setAppToken(null);
+          setIsOpen(true);
+          setTimeout(() => {
+            inputRef.current?.focus();
+          }, 100);
+        }}
+      >
+        Issue app token
+      </a>
+    </>
+  );
 };
 
 const ChangePasswordBtn = () => {
@@ -108,6 +258,9 @@ const ChangePasswordBtn = () => {
             setFormData({ ...formData, confirmNewPassword: e.target.value });
           }}
         />
+      </div>
+      <div className="form-group">
+        <small>Warning: {INVALIDATE_WARN}</small>
       </div>
     </div>
   );
@@ -207,6 +360,46 @@ const PasskeyBtn = ({
   );
 };
 
+const InvalidateBtn = () => {
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+
+  const invalidate = () => {
+    engine
+      .call("gate.invalidate")
+      .then(() => {
+        setTimeout(() => {
+          reloadPage();
+        }, 1000);
+      })
+      .catch((e) => {
+        console.error("Failed to delete passkey:", e);
+      });
+  };
+
+  return (
+    <>
+      <ModalDialog
+        title={`Invalidate`}
+        contentText={`${INVALIDATE_WARN}. Are you sure you want to continue?`}
+        open={isConfirmOpen}
+        onClose={() => setIsConfirmOpen(false)}
+        onConfirm={() => {
+          invalidate();
+        }}
+      />
+
+      <a
+        id="btn_invalidate"
+        onClick={() => setIsConfirmOpen(true)}
+        href="#"
+        className="btn outline"
+      >
+        Invalidate
+      </a>
+    </>
+  );
+};
+
 export const App = () => {
   //const [appDomain, setAppDomain] = useState<string | null>(null);
   const [apps, setApps] = useState<AppInfo[] | null>(null);
@@ -272,16 +465,22 @@ export const App = () => {
       </div>
 
       {apps != null ? (
-        <div id="footer">
-          <ChangePasswordBtn />
-          <PasskeyBtn
-            hasPasskey={hasPasskey}
-            forcePasskeyUpdate={forcePasskeyUpdate}
-          />
-          <a onClick={logout} href="#" className="btn outline">
-            Logout
-          </a>
-        </div>
+        <>
+          <div className="footer">
+            <AudTokenBtn apps={apps} />
+            <ChangePasswordBtn />
+            <PasskeyBtn
+              hasPasskey={hasPasskey}
+              forcePasskeyUpdate={forcePasskeyUpdate}
+            />
+          </div>
+          <div className="footer">
+            <InvalidateBtn />
+            <a onClick={logout} href="#" className="btn outline">
+              Logout
+            </a>
+          </div>
+        </>
       ) : null}
     </>
   );

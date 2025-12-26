@@ -9,7 +9,10 @@ use tokio::sync::Mutex;
 use url::Url;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{ConfigCheckIssue, Error, Result, util::GDuration};
+use crate::{
+    ConfigCheckIssue, Error, Result,
+    util::{GDuration, default_true},
+};
 
 #[derive(Deserialize, Copy, Clone, Default)]
 pub enum AppClientKind {
@@ -37,6 +40,8 @@ impl AppClientKind {
 pub struct Config {
     #[serde(default)]
     pub name: String,
+    #[serde(default = "default_true")]
+    pub allow_tokens: bool,
     #[serde(default)]
     pub url: String,
     #[zeroize(skip)]
@@ -157,7 +162,7 @@ impl AppHostMap {
             .cloned()
             .or_else(|| inner.default.as_ref().map(|(_, c)| c.clone()))
     }
-    pub async fn get_by_id(&self, id: &str) -> Option<Arc<Config>> {
+    pub async fn get_by_name(&self, id: &str) -> Option<Arc<Config>> {
         let inner = self.inner.lock().await;
         inner.apps.get(id).cloned()
     }
@@ -180,6 +185,7 @@ pub struct AppView {
     name: String,
     display_name: String,
     has_icon: bool,
+    allow_tokens: bool,
     url: String,
 }
 
@@ -201,6 +207,7 @@ impl AppHostMapInner {
                         name: n.clone(),
                         display_name: config.name.clone(),
                         has_icon: config.icon.is_some(),
+                        allow_tokens: config.allow_tokens,
                         url: config.url.clone(),
                     })
                 }

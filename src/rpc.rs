@@ -216,7 +216,7 @@ pub const ERR_ACCESS_DENIED_MORE_DATA_REQUIRED: i16 = -32022;
 
 #[inline]
 fn get_token_str(headers: &HeaderMap, context: &Context) -> Result<Zeroizing<String>> {
-    tokens::get_token_cookie(headers, context)
+    tokens::get_token_from_cookie_header(headers, context)
         .map(Zeroizing::new)
         .ok_or_else(|| Error::access("Valid authentication token required"))
 }
@@ -353,21 +353,23 @@ async fn rpc_regular(
             (Value::Null, None)
         };
     }
-    match method {
-        "test" => {
-            synth_sleep().await;
-            Ok((serde_json::json!({"ok": true}), None))
-        }
-        "gate.logout" => Ok((
-            Value::Null,
+    macro_rules! logout_hmap {
+        () => {
             token_cookie_hmap(
                 host,
                 &Zeroizing::new(String::new()),
                 0,
                 SetAuthCookie::Trusted,
                 context,
-            ),
-        )),
+            )
+        };
+    }
+    match method {
+        "test" => {
+            synth_sleep().await;
+            Ok((serde_json::json!({"ok": true}), None))
+        }
+        "gate.logout" => Ok((Value::Null, logout_hmap!())),
         "gate.passkey.register.start" => {
             let token_str = get_token_str(headers, context)?;
             let res = context.master_client.passkey_reg_start(token_str).await?;
@@ -430,6 +432,36 @@ async fn rpc_regular(
             context.master_client.passkey_delete(token_str).await?;
             info!(ip = %remote_ip, "User deleted passkey");
             Ok(no_reply!())
+        }
+        "gate.invalidate" => {
+            let token_str = get_token_str(headers, context)?;
+            context.master_client.invalidate(token_str).await?;
+            warn!(ip = %remote_ip, "User invalidated tokens");
+            Ok((Value::Null, logout_hmap!()))
+        }
+        "gate.issue_aud_token" => {
+            #[derive(Deserialize)]
+            struct Params {
+                app: String,
+                exp: u64,
+            }
+            let token_str = get_token_str(headers, context)?;
+            let p: Params = serde_json::from_value(params)?;
+            let app = context
+                .app_map
+                .get_by_name(&p.app)
+                .await
+                .ok_or_else(|| Error::failed(format!("App '{}' not found", p.app)))?;
+            let aud_token_str = context
+                .master_client
+                .issue_apps_token(
+                    &token_str,
+                    app.hosts.iter().map(String::as_str).collect(),
+                    p.exp,
+                )
+                .await?;
+            info!(ip = %remote_ip, app = %p.app, "Issued audience token for app");
+            Ok((serde_json::json!({ "aud_token": aud_token_str }), None))
         }
         "gate.set_password" => {
             #[derive(Deserialize)]

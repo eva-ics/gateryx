@@ -11,6 +11,7 @@ use std::{
 use crate::{
     Result,
     admin::TransferredRequest,
+    authenticator::RandomSleeper,
     passkeys::{Base64UrlSafeData, PublicKeyCredential, RegisterPublicKeyCredential},
     rpc::{RpcRequest as JsonRpcRequest, RpcResponse as JsonRpcResponse},
 };
@@ -130,7 +131,7 @@ impl MasterHandlers {
             return Ok(AuthResponse::InvalidCredentials(None));
         }
         self.context.report_auth_success(remote_ip, &user);
-        let (token_str, exp) = token_factory.issue(&user)?;
+        let (token_str, exp) = token_factory.issue(&user, vec![], None)?;
         Ok(AuthResponse::Success((token_str, user, exp)))
     }
     async fn authenticate(&self, p: AuthPayload, remote_ip: IpAddr) -> Result<AuthResponse> {
@@ -165,7 +166,7 @@ impl MasterHandlers {
                     maybe_need_captcha!(true);
                 }
                 self.context.report_auth_success(remote_ip, &p.user);
-                let (token_str, exp) = factory.issue(&p.user)?;
+                let (token_str, exp) = factory.issue(&p.user, vec![], None)?;
                 Ok(AuthResponse::Success((token_str, p.user.clone(), exp)))
             }
             crate::authenticator::AuthResult::Failure => {
@@ -210,7 +211,7 @@ impl MasterHandlers {
             return Err(Error::failed("Authentication is not enabled"));
         };
         match token_factory
-            .validate(token_str.to_string(), self.context.storage.as_ref())
+            .validate(token_str.to_string(), self.context.storage.as_ref(), false)
             .await
         {
             tokens::ValidationResponse::Valid { claims: c, .. } => Ok(c.sub),
@@ -263,7 +264,7 @@ impl MasterHandlers {
                 let Some(ref factory) = self.context.token_factory else {
                     return Err(Error::failed("Authentication not enabled"));
                 };
-                let expires = p.expires.unwrap_or(factory.expiration_seconds());
+                let expires = p.expires.unwrap_or(factory.max_expiration_seconds());
                 self.context
                     .storage
                     .invalidate(&p.user, Duration::from_secs(expires))
@@ -295,7 +296,10 @@ impl MasterHandlers {
                     if let Some(ref factory) = self.context.token_factory {
                         self.context
                             .storage
-                            .invalidate(&p.user, Duration::from_secs(factory.expiration_seconds()))
+                            .invalidate(
+                                &p.user,
+                                Duration::from_secs(factory.max_expiration_seconds()),
+                            )
                             .await?;
                     }
                     self.context.storage.delete_passkey(&p.user).await?;
@@ -324,7 +328,10 @@ impl MasterHandlers {
                     if let Some(ref factory) = self.context.token_factory {
                         self.context
                             .storage
-                            .invalidate(&p.user, Duration::from_secs(factory.expiration_seconds()))
+                            .invalidate(
+                                &p.user,
+                                Duration::from_secs(factory.max_expiration_seconds()),
+                            )
                             .await?;
                     }
                     Ok(Value::Null)
@@ -377,9 +384,9 @@ impl RpcHandlers for MasterHandlers {
                 let Some(ref token_factory) = self.context.token_factory else {
                     return Err(RpcError::method(None));
                 };
-                let token_str: String = event.unpack_payload()?;
+                let (token_str, allow_app_tokens): (String, bool) = event.unpack_payload()?;
                 let res = token_factory
-                    .validate(token_str, self.context.storage.as_ref())
+                    .validate(token_str, self.context.storage.as_ref(), allow_app_tokens)
                     .await;
                 Ok(Some(pack(res)?))
             }
@@ -401,6 +408,25 @@ impl RpcHandlers for MasterHandlers {
                     .as_ref()
                     .map(tokens::Factory::to_public);
                 Ok(Some(pack(public)?))
+            }
+            "t.iapps" => {
+                let (token_str, apps, exp): (String, Vec<String>, u64) = event.unpack_payload()?;
+                let Some(ref token_factory) = self.context.token_factory else {
+                    return Err(RpcError::method(None));
+                };
+                let tokens::ValidationResponse::Valid { claims, .. } = token_factory
+                    .validate(token_str.clone(), self.context.storage.as_ref(), false)
+                    .await
+                else {
+                    return Err(Error::access("Invalid token").into());
+                };
+                if apps.is_empty() {
+                    return Err(Error::invalid_data("Audience list is empty").into());
+                }
+                let sleeper = RandomSleeper::new(100..300);
+                let (token, _token_exp) = token_factory.issue(&claims.sub, apps, Some(exp))?;
+                sleeper.sleep().await;
+                Ok(Some(pack(token)?))
             }
             "c.get" => {
                 let (uuid_str, ip_address): (String, IpAddr) = event.unpack_payload()?;
@@ -482,13 +508,36 @@ impl RpcHandlers for MasterHandlers {
                     if let Some(ref factory) = self.context.token_factory {
                         self.context
                             .storage
-                            .invalidate(&user, Duration::from_secs(factory.expiration_seconds()))
+                            .invalidate(
+                                &user,
+                                Duration::from_secs(factory.max_expiration_seconds()),
+                            )
                             .await?;
                     }
-                    Ok(None)
+                    Ok(Some(pack(true)?))
                 } else {
                     Err(Error::failed("Authenticator not configured").into())
                 }
+            }
+            "a.inv" => {
+                let token_str: String = event.unpack_payload()?;
+                let Some(token_factory) = &self.context.token_factory else {
+                    return Err(RpcError::method(None));
+                };
+                let tokens::ValidationResponse::Valid { claims, .. } = token_factory
+                    .validate(token_str, self.context.storage.as_ref(), false)
+                    .await
+                else {
+                    return Err(Error::access("Invalid token").into());
+                };
+                self.context
+                    .storage
+                    .invalidate(
+                        &claims.sub,
+                        Duration::from_secs(token_factory.max_expiration_seconds()),
+                    )
+                    .await?;
+                Ok(Some(pack(true)?))
             }
             "!" => {
                 let (admin_request, remote_ip): (TransferredRequest, IpAddr) =

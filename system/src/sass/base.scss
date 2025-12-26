@@ -1,5 +1,5 @@
 @use "mixin" as *;
-
+base
 #root {
   display: flex;
   flex-direction: column;
@@ -7,7 +7,7 @@
   height: 100%;
 }
 
-#footer {
+.footer {
   width: 100%;
   max-width: 390px;
   margin-top: 10px;
@@ -15,14 +15,18 @@
   flex-direction: column;
   align-items: center;
   gap: 14px;
-  margin: 20px auto 20px auto;
+  margin: 10px auto 0px auto;
   @include media(tablet) {
     flex-direction: row;
-    max-width: 700px;
+    max-width: 900px;
   }
 }
 
-#footer .btn {
+.copy-btn {
+  margin-left: 8px;
+}
+
+.footer .btn {
   display: block;
   width: 100%;
   max-width: 320px;
@@ -33,24 +37,27 @@
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s ease;
+  @include media(tablet) {
+    max-width: 200px;
+  }
 }
-#footer .btn.primary {
+.footer .btn.primary {
   padding: 10px 0;
   background: #0094ff;
   color: #fff;
   border: none;
 }
-#footer .btn.primary:hover {
+.footer .btn.primary:hover {
   background: #1976d2;
 }
 
-#footer .btn.outline {
+.footer .btn.outline {
   padding: 9px 0;
   background: transparent;
   color: #0094ff;
   border: 1px solid #fff;
 }
-#footer .btn.outline:hover {
+.footer .btn.outline:hover {
   background: rgba(33, 150, 243, 0.1);
   border: 1px solid #0094ff;
 }
@@ -68,7 +75,7 @@
   border-radius: 8px;
   padding: 8px 5px;
   width: 95%;
-  margin: 10px auto 0 auto;
+  margin: 10px auto 30px auto;
 }
 .app > a {
   text-decoration: none;

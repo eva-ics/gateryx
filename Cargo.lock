@@ -1314,11 +1314,12 @@ dependencies = [
 
 [[package]]
 name = "gateryx"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
  "atomic-timer",
+ "base64 0.22.1",
  "bcrypt",
  "bma-ts",
  "brotli",
