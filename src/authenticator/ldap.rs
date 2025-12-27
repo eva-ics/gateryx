@@ -170,12 +170,16 @@ impl LdapPool {
             config: config.clone(),
         }
     }
-    fn ldap_user(&self, user: &str) -> String {
-        if user.contains('@') {
-            format!("cn={},{}", user, self.config.path)
+    async fn ldap_user(&self, user: &str, ldap: &mut Ldap) -> Result<String> {
+        Ok(if user.contains('@') {
+            format!(
+                "cn={},{}",
+                ldap.get_user_by_email(user).await?,
+                self.config.path
+            )
         } else {
             format!("cn={},{}", user, self.config.path)
-        }
+        })
     }
     async fn start_connector(&self) {
         let connector = tokio::spawn({
@@ -223,7 +227,7 @@ impl LdapPool {
         let pool = self.get_pool().await?;
         let mut ldap = pool.get().await;
         let attrs = vec!["memberOf"];
-        let ldap_user = self.ldap_user(user);
+        let ldap_user = self.ldap_user(user, &mut ldap).await?;
         let (rs, _) = ldap
             .inner
             .search(&ldap_user, ldap3::Scope::Base, "(objectClass=*)", attrs)
@@ -239,18 +243,14 @@ impl LdapPool {
                 .next()
                 .ok_or_else(|| Error::failed("No search entry found"))?,
         );
-        let member_of = se
-            .attrs
-            .get("memberOf")
-            .map(|v| v.clone())
-            .unwrap_or_default();
+        let member_of = se.attrs.get("memberOf").cloned().unwrap_or_default();
         let groups = member_of
             .into_iter()
             .filter_map(|dn| {
                 dn.split(',')
                     .next()
                     .and_then(|cn_part| cn_part.strip_prefix("CN="))
-                    .map(|s| s.to_string())
+                    .map(ToString::to_string)
             })
             .collect();
         Ok(groups)
@@ -270,7 +270,7 @@ impl LdapPool {
                 attrs.push("ak-active");
             }
         }
-        let ldap_user = self.ldap_user(user);
+        let ldap_user = self.ldap_user(user, &mut ldap).await?;
         let (rs, _) = ldap
             .inner
             .search(&ldap_user, ldap3::Scope::Base, "(objectClass=*)", attrs)

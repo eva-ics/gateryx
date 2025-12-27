@@ -96,7 +96,7 @@ impl Claims {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ClaimsView {
     pub sub: String,
     pub iat: Timestamp,

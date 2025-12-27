@@ -123,6 +123,12 @@ impl ServeApp {
             ServeApp::VirtualApp(vapp) => vapp.verify_ip(ip),
         }
     }
+    fn groups(&self) -> &[String] {
+        match self {
+            ServeApp::App(app) => &app.allow_groups,
+            ServeApp::VirtualApp(_) => &[],
+        }
+    }
     async fn resolve_force(context: &Context, app_name: &str) -> Option<Self> {
         if let Some(v) = context.virtual_app_map.get_by_id(app_name) {
             Some(ServeApp::VirtualApp(v))
@@ -467,7 +473,19 @@ async fn handle_http_request(
                 .await
             {
                 Ok(tokens::ValidationResponse::Valid { token_s, claims: c }) => {
-                    if !c.apps.is_empty() {
+                    debug!(ip = %remote_ip, claims = ?c, "Token validated");
+                    if c.apps.is_empty() {
+                        // user token
+                        let groups = app.groups();
+                        if !groups.is_empty() && !c.groups.iter().any(|g| groups.contains(g)) {
+                            error!(ip = %remote_ip, host = %original_host, user = %c.sub,
+                                    user_groups = ?c.groups, app_groups = ?groups,
+                                "Token groups do not match app allowed groups");
+                            synth_sleep().await;
+                            return Ok(http_response_forbidden().await);
+                        }
+                    } else {
+                        // app token
                         let hosts = app.hosts();
                         if hosts.is_empty() {
                             error!(ip = %remote_ip,
@@ -500,7 +518,7 @@ async fn handle_http_request(
         ServeApp::App(a) => a,
         ServeApp::VirtualApp(v) => {
             return v
-                .serve_authenticated(request, remote_ip, with_tls, context)
+                .serve_authenticated(request, remote_ip, with_tls, claims.as_ref(), context)
                 .await;
         }
     };
