@@ -175,6 +175,7 @@ const AudTokenBtn = ({ apps }: { apps: AppInfo[] }) => {
           setError(null);
           setSuccess(null);
           setAppToken(null);
+          setFormData({ app: "", exp: 30 });
           setIsOpen(true);
           setTimeout(() => {
             inputRef.current?.focus();
