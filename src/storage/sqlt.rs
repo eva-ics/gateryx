@@ -3,6 +3,7 @@ use std::{str::FromStr as _, time::Duration};
 use async_trait::async_trait;
 use bma_ts::Timestamp;
 use log::LevelFilter;
+use mini_moka::sync::Cache;
 use sqlx::{
     ConnectOptions,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteSynchronous},
@@ -14,6 +15,7 @@ use crate::{Error, Result, authenticator::UserInfo};
 
 pub struct Storage {
     pool: SqlitePool,
+    revocation_cache: Cache<String, Option<Timestamp>>,
 }
 
 impl Storage {
@@ -37,7 +39,36 @@ impl Storage {
             .acquire_timeout(timeout)
             .connect_with(opts)
             .await?;
-        Ok(Self { pool })
+        let revocation_cache = Cache::builder()
+            .max_capacity(65535)
+            .time_to_live(Duration::from_secs(1))
+            .build();
+        Ok(Self {
+            pool,
+            revocation_cache,
+        })
+    }
+
+    async fn token_revocation_timestamp(&self, user: &str) -> Result<Option<Timestamp>> {
+        if let Some(t) = self.revocation_cache.get(&user.to_owned()) {
+            return Ok(t);
+        }
+        let row = sqlx::query(
+            r"
+            SELECT not_before FROM revoked_tokens
+            WHERE user = ?
+            ",
+        )
+        .bind(user)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let not_before = row.try_get("not_before")?;
+        self.revocation_cache
+            .insert(user.to_owned(), Some(not_before));
+        Ok(Some(not_before))
     }
 }
 
@@ -111,20 +142,10 @@ impl super::Storage for Storage {
     }
 
     async fn is_token_revoked(&self, user: &str, t_issued: Timestamp) -> Result<bool> {
-        let row: (i64,) = sqlx::query_as(
-            r"
-            SELECT COUNT(*) FROM revoked_tokens
-            WHERE user = ? and not_before > ?
-            ",
-        )
-        .bind(user)
-        .bind(t_issued)
-        .fetch_one(&self.pool)
-        .await?;
-        if row.0 > 0 {
-            return Ok(true);
-        }
-        Ok(false)
+        let Some(not_before) = self.token_revocation_timestamp(user).await? else {
+            return Ok(false);
+        };
+        Ok(t_issued < not_before)
     }
 
     async fn cleanup(&self) -> Result<()> {
