@@ -130,8 +130,13 @@ impl MasterHandlers {
         {
             return Ok(AuthResponse::InvalidCredentials(None));
         }
+        let groups = if let Some(ref auth) = self.context.authenticator {
+            auth.groups(&user).await?
+        } else {
+            vec![]
+        };
         self.context.report_auth_success(remote_ip, &user);
-        let (token_str, exp) = token_factory.issue(&user, vec![], None)?;
+        let (token_str, exp) = token_factory.issue(&user, groups, vec![], None)?;
         Ok(AuthResponse::Success((token_str, user, exp)))
     }
     async fn authenticate(&self, p: AuthPayload, remote_ip: IpAddr) -> Result<AuthResponse> {
@@ -157,7 +162,7 @@ impl MasterHandlers {
             return Ok(AuthResponse::AuthNotEnabled);
         };
         match auth.verify(&p.user, &p.password).await {
-            crate::authenticator::AuthResult::Success => {
+            crate::authenticator::AuthResult::Success { groups } => {
                 if !self.verify_captcha(
                     p.captcha_id.as_deref(),
                     p.captcha_str.as_deref(),
@@ -166,7 +171,7 @@ impl MasterHandlers {
                     maybe_need_captcha!(true);
                 }
                 self.context.report_auth_success(remote_ip, &p.user);
-                let (token_str, exp) = factory.issue(&p.user, vec![], None)?;
+                let (token_str, exp) = factory.issue(&p.user, groups, vec![], None)?;
                 Ok(AuthResponse::Success((token_str, p.user.clone(), exp)))
             }
             crate::authenticator::AuthResult::Failure => {
@@ -424,7 +429,8 @@ impl RpcHandlers for MasterHandlers {
                     return Err(Error::invalid_data("Audience list is empty").into());
                 }
                 let sleeper = RandomSleeper::new(100..300);
-                let (token, _token_exp) = token_factory.issue(&claims.sub, apps, Some(exp))?;
+                let (token, _token_exp) =
+                    token_factory.issue(&claims.sub, vec![], apps, Some(exp))?;
                 sleeper.sleep().await;
                 Ok(Some(pack(token)?))
             }

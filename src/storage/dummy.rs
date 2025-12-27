@@ -63,4 +63,8 @@ impl super::Storage for Storage {
     async fn list_users(&self) -> Result<Vec<UserInfo>> {
         Ok(Vec::new())
     }
+
+    async fn user_groups(&self, _user: &str) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
 }

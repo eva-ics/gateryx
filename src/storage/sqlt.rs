@@ -121,7 +121,55 @@ impl super::Storage for Storage {
         )
         .execute(&self.pool)
         .await?;
+        sqlx::query(
+            r"
+            CREATE TABLE IF NOT EXISTS groups (
+                name VARCHAR PRIMARY KEY
+            );
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+        sqlx::query(
+            r"
+            CREATE TABLE IF NOT EXISTS user_groups (
+                user VARCHAR,
+                group_name VARCHAR,
+                PRIMARY KEY (user, group_name),
+                FOREIGN KEY (user) REFERENCES users(user) ON DELETE CASCADE,
+                FOREIGN KEY (group_name) REFERENCES groups(name) ON DELETE CASCADE
+            );
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+        // enable foreign keys
+        sqlx::query(
+            r"
+            PRAGMA foreign_keys = ON;
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(())
+    }
+
+    async fn user_groups(&self, user: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            r"
+            SELECT group_name FROM user_groups
+            WHERE user = ?
+            ",
+        )
+        .bind(user)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut groups = Vec::new();
+        for row in rows {
+            let group_name: String = row.try_get("group_name")?;
+            groups.push(group_name);
+        }
+        Ok(groups)
     }
 
     async fn invalidate(&self, user: &str, record_expires: Duration) -> Result<()> {

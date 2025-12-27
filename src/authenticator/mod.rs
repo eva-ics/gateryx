@@ -148,6 +148,9 @@ impl Authenticator for DummyAuthenticator {
     async fn verify(&self, _login: &str, _password: &str) -> AuthResult {
         AuthResult::Failure
     }
+    async fn groups(&self, _login: &str) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
 }
 
 #[derive(Deserialize, Default, Zeroize, ZeroizeOnDrop)]
@@ -225,13 +228,14 @@ impl AuthenticatorConfig {
 }
 
 pub enum AuthResult {
-    Success,
+    Success { groups: Vec<String> },
     Failure,
 }
 
 #[async_trait::async_trait]
 pub trait Authenticator: Send + Sync {
     async fn present(&self, login: &str) -> bool;
+    async fn groups(&self, login: &str) -> Result<Vec<String>>;
     async fn verify(&self, login: &str, password: &str) -> AuthResult;
     async fn add(&self, _login: &str, _password: &str) -> Result<()> {
         Err(Error::failed("not implemented"))
@@ -251,7 +255,10 @@ pub trait Authenticator: Send + Sync {
         old_password: &str,
         new_password: &str,
     ) -> Result<()> {
-        if !matches!(self.verify(login, old_password).await, AuthResult::Success) {
+        if !matches!(
+            self.verify(login, old_password).await,
+            AuthResult::Success { .. }
+        ) {
             return Err(Error::failed("authentication failed"));
         }
         self.set_password_forced(login, new_password).await

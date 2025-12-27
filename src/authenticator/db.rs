@@ -50,7 +50,14 @@ impl DbAuth {
                     .is_ok()
                 {
                     self.storage.touch_user(login).await.ok();
-                    AuthResult::Success
+                    let groups = match self.storage.user_groups(login).await {
+                        Ok(gs) => gs,
+                        Err(e) => {
+                            error!(%e, "error retrieving user groups from database");
+                            return AuthResult::Failure;
+                        }
+                    };
+                    AuthResult::Success { groups }
                 } else {
                     AuthResult::Failure
                 }
@@ -79,9 +86,9 @@ impl Authenticator for DbAuth {
     async fn verify(&self, login: &str, password: &str) -> AuthResult {
         let random_sleeper = RandomSleeper::new(100..300);
         match self.verify_password(login, password).await {
-            AuthResult::Success => {
+            AuthResult::Success { groups } => {
                 random_sleeper.sleep().await;
-                AuthResult::Success
+                AuthResult::Success { groups }
             }
             AuthResult::Failure => {
                 random_sleeper.sleep().await;
@@ -89,6 +96,9 @@ impl Authenticator for DbAuth {
                 AuthResult::Failure
             }
         }
+    }
+    async fn groups(&self, login: &str) -> Result<Vec<String>> {
+        self.storage.user_groups(login).await
     }
     async fn add(&self, login: &str, password: &str) -> Result<()> {
         let password_hash = self.hash_password(password)?;
@@ -108,7 +118,7 @@ impl Authenticator for DbAuth {
         new_password: &str,
     ) -> Result<()> {
         match self.verify_password(login, old_password).await {
-            AuthResult::Success => self.set_password_forced(login, new_password).await,
+            AuthResult::Success { .. } => self.set_password_forced(login, new_password).await,
             AuthResult::Failure => Err(Error::failed("authentication failed")),
         }
     }

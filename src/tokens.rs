@@ -80,6 +80,8 @@ pub struct Claims {
     pub jti: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
 }
 
 impl Claims {
@@ -89,6 +91,7 @@ impl Claims {
             iat: Timestamp::from_secs(self.iat),
             exp: Timestamp::from_secs(self.exp),
             apps: self.apps.clone(),
+            groups: self.groups.clone(),
         }
     }
 }
@@ -100,6 +103,8 @@ pub struct ClaimsView {
     pub exp: Timestamp,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -282,6 +287,7 @@ impl Factory {
     pub fn issue<S: AsRef<str>>(
         &self,
         sub: S,
+        groups: Vec<String>,
         apps: Vec<String>,
         exp: Option<u64>,
     ) -> Result<(String, u64)> {
@@ -303,6 +309,7 @@ impl Factory {
             iss: self.issuer_uri.clone(),
             jti: uuid::Uuid::new_v4().to_string(),
             apps,
+            groups,
         };
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256),
