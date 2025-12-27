@@ -286,8 +286,32 @@ async fn invalid_token_result(
     with_tls: bool,
     context: &Context,
 ) -> ByteResponse {
-    synth_sleep().await;
     debug!(ip = %remote_ip, "No valid token");
+    synth_sleep().await;
+    // web browser clients
+    if request
+        .headers()
+        .get("accept")
+        .is_some_and(|v| v.to_str().ok().is_some_and(|s| s.contains("text/html")))
+    {
+        let primary_host = context
+            .primary_host
+            .as_ref()
+            .filter(|_| {
+                context
+                    .token_domain_dot_prefixed
+                    .as_ref()
+                    .is_some_and(|v| original_host.ends_with(v))
+            })
+            .map(String::as_str);
+        return auth_redirect(
+            primary_host.unwrap_or(original_host),
+            original_host,
+            request.uri(),
+            with_tls,
+            remote_ip,
+        );
+    }
     if allow_tokens {
         let user_agent = request
             .headers()
@@ -321,29 +345,6 @@ async fn invalid_token_result(
                     .boxed(),
             )
             .unwrap();
-    }
-    if request
-        .headers()
-        .get("accept")
-        .is_some_and(|v| v.to_str().ok().is_some_and(|s| s.contains("text/html")))
-    {
-        let primary_host = context
-            .primary_host
-            .as_ref()
-            .filter(|_| {
-                context
-                    .token_domain_dot_prefixed
-                    .as_ref()
-                    .is_some_and(|v| original_host.ends_with(v))
-            })
-            .map(String::as_str);
-        return auth_redirect(
-            primary_host.unwrap_or(original_host),
-            original_host,
-            request.uri(),
-            with_tls,
-            remote_ip,
-        );
     }
     http_response_forbidden().await
 }

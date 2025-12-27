@@ -38,7 +38,7 @@ fn default_401_agent_list() -> UserAgentList {
     UserAgentList(vec![
         "curl/*".to_string(),
         "Wget/*".to_string(),
-        "get/*".to_string(),
+        "git/*".to_string(),
     ])
 }
 
