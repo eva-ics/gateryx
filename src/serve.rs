@@ -150,7 +150,11 @@ impl ServeApp {
     }
 }
 
-fn insert_jwt_assertion(jwt_token: Option<&str>, request: &mut Request<Incoming>) {
+fn insert_jwt_assertion(
+    jwt_token: Option<&str>,
+    request: &mut Request<Incoming>,
+    context: &Context,
+) {
     let Some(token) = jwt_token else {
         return;
     };
@@ -163,7 +167,7 @@ fn insert_jwt_assertion(jwt_token: Option<&str>, request: &mut Request<Incoming>
     };
     request
         .headers_mut()
-        .insert("X-JWT-Assertion", header_value);
+        .insert(&context.headers.jwt_assertion, header_value);
 }
 
 async fn serve_captcha(
@@ -290,9 +294,7 @@ async fn invalid_token_result(
             .get(header::USER_AGENT)
             .and_then(|v| v.to_str().ok());
         // return basic auth for git and similar clients
-        if user_agent
-            .is_some_and(|ua| ua.contains("git/") || ua.contains("curl/") || ua.contains("Wget/"))
-        {
+        if user_agent.is_some_and(|ua| context.reply_401_to_user_agents.matches(ua)) {
             return Response::builder()
                 .status(401)
                 .header(
@@ -553,12 +555,13 @@ async fn handle_http_request(
         if let Some(sub) = token_sub
             && let Ok(s) = sub.parse()
         {
-            request.headers_mut().insert("X-Gateryx-User", s);
-            request
-                .headers_mut()
-                .insert("X-Real-IP", remote_ip.to_string().parse().unwrap());
+            request.headers_mut().insert(&context.headers.user, s);
+            request.headers_mut().insert(
+                &context.headers.real_ip,
+                remote_ip.to_string().parse().unwrap(),
+            );
         }
-        insert_jwt_assertion(jwt_token.as_deref(), &mut request);
+        insert_jwt_assertion(jwt_token.as_deref(), &mut request, context);
     }
     if request
         .headers()
@@ -577,7 +580,7 @@ async fn handle_http_request(
         .await;
         response
             .headers_mut()
-            .insert("X-Via", "Gateryx".parse().unwrap());
+            .insert(&context.headers.via, "Gateryx".parse().unwrap());
         return Ok(response);
     }
     let (mut parts, body) = request.into_parts();
@@ -622,7 +625,9 @@ async fn handle_http_request(
         Ok(Ok(v)) => {
             // convert body to boxed body, keep headers and status code
             let (mut parts, body) = v.into_parts();
-            parts.headers.append("X-Via", "Gateryx".parse().unwrap());
+            parts
+                .headers
+                .append(&context.headers.via, "Gateryx".parse().unwrap());
             if http2 {
                 parts.headers.remove(header::CONNECTION);
             } else if keep_alive {

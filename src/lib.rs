@@ -22,6 +22,7 @@ mod bp;
 mod compress;
 mod error;
 mod gate;
+mod headers;
 mod logger;
 mod ml;
 pub mod panic_handler;
@@ -66,6 +67,9 @@ pub struct Config {
     pub admin: Option<admin::Config>,
     #[serde(default)]
     pub app: Vec<app::Config>,
+    #[zeroize(skip)]
+    #[serde(default)]
+    pub headers: headers::Headers,
 }
 
 impl Config {

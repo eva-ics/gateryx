@@ -3,6 +3,8 @@ use std::{net::IpAddr, os::fd::FromRawFd as _, sync::Arc, time::Duration};
 use crate::{
     AppHostMap, Config, Result, VAppMap,
     admin::TransferredRequest,
+    authenticator::UserAgentList,
+    headers::WebHeaders,
     is_developent_mode,
     logger::{LogSender, MetaLogSender},
     ml,
@@ -61,7 +63,8 @@ pub struct ContextData {
     pub development: bool,
     pub master_client: Client,
     pub token_cookie_name: String,
-    //pub token_cookie_name_with_eq: String,
+    pub headers: WebHeaders,
+    pub reply_401_to_user_agents: UserAgentList,
 }
 
 impl ContextData {
@@ -377,7 +380,12 @@ pub async fn prepare_privileged(
         development: is_developent_mode(),
         master_client: Client::uninitialized(),
         token_cookie_name: <_>::default(),
-        //token_cookie_name_with_eq: <_>::default(),
+        headers: config.headers.clone().try_into()?,
+        reply_401_to_user_agents: config
+            .auth
+            .as_ref()
+            .map(|auth_config| auth_config.reply_401_to_user_agents.clone())
+            .unwrap_or_default(),
     };
     if let Some(ref auth_config) = config.auth {
         context_data
@@ -390,7 +398,6 @@ pub async fn prepare_privileged(
             TOKEN_COOKIE_NAME_PREFIX,
             auth_config.tokens.cookie.clone()
         );
-        //context_data.token_cookie_name_with_eq = format!("{}=", context_data.token_cookie_name);
         context_data
             .auth_www_static
             .replace(Static::new(&auth_config.www_root));

@@ -16,6 +16,32 @@ pub mod db;
 pub mod htpasswd;
 pub mod ldap;
 
+#[derive(Default, Deserialize, Clone)]
+pub struct UserAgentList(Vec<String>);
+
+impl UserAgentList {
+    pub fn matches(&self, user_agent: &str) -> bool {
+        for pattern in &self.0 {
+            if let Some(id) = pattern.strip_suffix('*') {
+                if user_agent.starts_with(id) {
+                    return true;
+                }
+            } else if user_agent == pattern {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn default_401_agent_list() -> UserAgentList {
+    UserAgentList(vec![
+        "curl/*".to_string(),
+        "Wget/*".to_string(),
+        "get/*".to_string(),
+    ])
+}
+
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -27,6 +53,9 @@ pub struct Config {
     pub tokens: tokens::Config,
     #[serde(default)]
     pub passkeys: Option<passkeys::Config>,
+    #[serde(default = "default_401_agent_list")]
+    #[zeroize(skip)]
+    pub reply_401_to_user_agents: UserAgentList,
 }
 
 impl Config {

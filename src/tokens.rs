@@ -22,8 +22,6 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 pub const TOKEN_COOKIE_NAME_PREFIX: &str = "gateryx_auth_";
 pub const DEFAULT_TOKEN_COOKIE_NAME: &str = "token";
 
-pub const GATERYX_AUTH_HEADER: &str = "X-Gateryx-Authorization";
-
 fn default_token_cookie_name() -> String {
     DEFAULT_TOKEN_COOKIE_NAME.to_string()
 }
@@ -146,10 +144,10 @@ pub fn extract_token_from_headers(
     }
     if allow_app_tokens {
         let mut token_str = None;
-        for auth_header in headers.get_all(GATERYX_AUTH_HEADER) {
+        for auth_header in headers.get_all(&context.headers.authorization) {
             process_auth_header!(auth_header, token_str);
         }
-        headers.remove(GATERYX_AUTH_HEADER);
+        headers.remove(&context.headers.authorization);
         if token_str.is_some() {
             return token_str;
         }
