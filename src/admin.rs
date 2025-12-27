@@ -10,7 +10,7 @@ use httpsig_hyper::{
     MessageSignatureReq as _, RequestContentDigest as _,
     prelude::{HttpSignatureParams, PublicKey, SecretKey, message_component},
 };
-use hyper::body::{Bytes, Incoming};
+use hyper::body::{Body, Bytes, Incoming};
 use p256::{PublicKey as EcPublicKey, ecdsa::SigningKey};
 use pkcs8::DecodePrivateKey as _;
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,8 @@ use crate::{
 const HEADER_CONTENT_DIGEST: HeaderName = HeaderName::from_static("content-digest");
 const HEADER_SIGNATURE_INPUT: HeaderName = HeaderName::from_static("signature-input");
 const HEADER_SIGNATURE: HeaderName = HeaderName::from_static("signature");
+
+const ADMIN_MAX_BODY_SIZE: usize = 4096;
 
 fn default_admin_max_time_diff() -> GDuration {
     GDuration::from_secs(300)
@@ -85,6 +87,11 @@ pub struct TransferredRequest {
 impl TransferredRequest {
     pub async fn create(http_req: Request<Incoming>, remote_ip: IpAddr) -> Result<Self> {
         let (parts, body) = http_req.into_parts();
+        let size = body.size_hint().upper().unwrap_or_default();
+        if size > ADMIN_MAX_BODY_SIZE as u64 {
+            error!(ip = %remote_ip, "RPC request body too large: {} bytes", size);
+            return Err(Error::failed("Request body too large"));
+        }
         macro_rules! get_header {
             ($key: expr, $disp: expr) => {
                 parts

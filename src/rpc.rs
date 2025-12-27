@@ -408,6 +408,12 @@ async fn rpc_regular(
             }
             synth_sleep().await;
             let p: Params = serde_json::from_value(params)?;
+            if p.challenge.len() > 4096 {
+                warn!(ip = %remote_ip, "Passkey authentication challenge too large");
+                return Err(Error::invalid_data(
+                    "Invalid passkey authentication challenge",
+                ));
+            }
             process_auth(
                 host,
                 context
@@ -487,6 +493,11 @@ async fn rpc_regular(
                 set_auth_cookie: SetAuthCookie,
             }
             let p: Params = serde_json::from_value(params)?;
+            if !p.auth.valid() {
+                synth_sleep().await;
+                warn!(ip = %remote_ip, "Invalid authentication payload");
+                return Err(Error::invalid_data("Invalid authentication payload"));
+            }
             process_auth(
                 host,
                 context.master_client.authenticate(&p.auth, remote_ip),

@@ -57,6 +57,15 @@ pub struct AuthPayload {
     captcha_str: Option<String>,
 }
 
+impl AuthPayload {
+    pub fn valid(&self) -> bool {
+        self.user.len() < 256
+            && self.password.len() < 256
+            && self.captcha_id.as_ref().is_none_or(|c| c.len() < 256)
+            && self.captcha_str.as_ref().is_none_or(|c| c.len() < 256)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ChangePasswordPayload {
     token_str: Zeroizing<String>,
