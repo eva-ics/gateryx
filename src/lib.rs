@@ -6,7 +6,6 @@ use std::{
 use http::Response;
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
-use ipnetwork::IpNetwork;
 use serde::Deserialize;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -41,7 +40,7 @@ pub use error::{ConfigCheckIssue, Error};
 pub use gate::run;
 pub use vapp::VAppMap;
 
-use crate::util::{GDuration, Numeric};
+use crate::util::{AllowRemoteAny, GDuration, Numeric};
 
 pub type Result<T> = std::result::Result<T, Error>;
 pub type ByteResponse = Response<BoxBody<Bytes, StdError>>;
@@ -172,7 +171,7 @@ pub struct ListenerConfig {
     pub protocol: L7Protocol,
     #[zeroize(skip)]
     #[serde(default)]
-    pub allow: Vec<IpNetwork>,
+    pub allow: AllowRemoteAny,
 }
 
 impl ListenerConfig {

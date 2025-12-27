@@ -41,7 +41,7 @@ use crate::{
     rpc::{self, URI_RPC, URI_RPC_ADMIN},
     tokens,
     util::{
-        self, AllowRemote, downgrade_to_http11, http_internal_server_error, http_response,
+        self, AllowRemoteAny, downgrade_to_http11, http_internal_server_error, http_response,
         http_response_forbidden, resolve_host, synth_sleep,
     },
     vapp::VirtualApp,
@@ -115,6 +115,12 @@ impl ServeApp {
         match self {
             ServeApp::App(app) => app.hosts.iter().map(String::as_str).collect(),
             ServeApp::VirtualApp(_) => vec![],
+        }
+    }
+    fn verify_ip(&self, ip: IpAddr) -> bool {
+        match self {
+            ServeApp::App(app) => app.allow.verify_ip(ip),
+            ServeApp::VirtualApp(vapp) => vapp.verify_ip(ip),
         }
     }
     async fn resolve_force(context: &Context, app_name: &str) -> Option<Self> {
@@ -350,7 +356,7 @@ async fn handle_http_request(
     worker_pool: TaskPool,
     with_tls: bool,
     http2: bool,
-    allow: AllowRemote,
+    allow: AllowRemoteAny,
     force_app: Option<Arc<String>>,
     token_sub: &mut Option<String>,
 ) -> HByteResult {
@@ -386,6 +392,15 @@ async fn handle_http_request(
         size = size,
         "Request"
     );
+    let Some(app) = ServeApp::resolve(context, &original_host, force_app).await else {
+        error!(ip = %remote_ip, host = %original_host, "No app configured for host");
+        return Ok(http_response(404, "Not Found").await);
+    };
+    if !app.verify_ip(remote_ip) {
+        warn!(ip = %remote_ip, host = %original_host, "Remote IP not allowed for app");
+        synth_sleep().await;
+        return Ok(http_response_forbidden().await);
+    }
     if request.uri().path() == "/robots.txt" {
         return Ok(deny_robots().await);
     }
@@ -407,10 +422,6 @@ async fn handle_http_request(
     if request.uri().path().starts_with(URI_AUTH_PREFIX) {
         return Ok(serve_auth(request, remote_ip, context).await);
     }
-    let Some(app) = ServeApp::resolve(context, &original_host, force_app).await else {
-        error!(ip = %remote_ip, host = %original_host, "No app configured for host");
-        return Ok(http_response(404, "Not Found").await);
-    };
     if let ServeApp::VirtualApp(ref v) = app
         && let Some(res) = v
             .serve_insecure(&request, remote_ip, with_tls, context)
@@ -639,7 +650,7 @@ async fn handle_http_request(
     Ok(res)
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 async fn handle_stream<S>(
     io: TokioIo<S>,
     ip: IpAddr,
@@ -647,7 +658,7 @@ async fn handle_stream<S>(
     context: Context,
     with_tls: bool,
     http2: bool,
-    allow: AllowRemote,
+    allow: AllowRemoteAny,
     force_app: Option<Arc<String>>,
 ) where
     S: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
@@ -799,7 +810,7 @@ pub async fn handle_listener(
     let worker_pool = TaskPool(Arc::new(tokio_task_pool::Pool::bounded(
         config.max_workers.into(),
     )));
-    let allow = AllowRemote::new(&config.allow).with_empty_ok();
+    let allow = config.allow.clone();
     tokio::spawn({
         let client_pool = client_pool.clone();
         let worker_pool = worker_pool.clone();

@@ -60,13 +60,17 @@ pub fn add_apps(
                 } else {
                     warn!(path = %path.display(), "Multiple system virtual apps defined");
                 }
-                let v = vapp::System::create(config.remote.clone());
+                let v = vapp::System::create(config.remote.clone(), config.allow.clone());
                 info!(path = %path.display(), id = v_id, "Loaded virtual app");
                 virtual_app_map.add(config.hosts.clone(), v_id, v);
                 continue;
             }
             if v_id == vapp::Plain::id() {
-                let v = vapp::Plain::create(config.remote.clone(), config.settings.clone());
+                let v = vapp::Plain::create(
+                    config.remote.clone(),
+                    config.settings.clone(),
+                    config.allow.clone(),
+                );
                 info!(path = %path.display(), id = v_id, "Loaded virtual app");
                 virtual_app_map.add(config.hosts.clone(), v_id, v);
                 continue;

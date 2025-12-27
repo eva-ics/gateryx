@@ -11,7 +11,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
     ConfigCheckIssue, Error, Result,
-    util::{GDuration, default_true},
+    util::{AllowRemoteAny, GDuration, default_true},
 };
 
 #[derive(Deserialize, Copy, Clone, Default)]
@@ -69,6 +69,9 @@ pub struct Config {
     pub websocket: Option<crate::ws::Config>,
     #[zeroize(skip)]
     pub settings: Option<serde_json::Value>,
+    #[zeroize(skip)]
+    #[serde(default)]
+    pub allow: AllowRemoteAny,
 }
 
 impl Config {

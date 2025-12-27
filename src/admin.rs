@@ -11,7 +11,6 @@ use httpsig_hyper::{
     prelude::{HttpSignatureParams, PublicKey, SecretKey, message_component},
 };
 use hyper::body::{Bytes, Incoming};
-use ipnetwork::IpNetwork;
 use p256::{PublicKey as EcPublicKey, ecdsa::SigningKey};
 use pkcs8::DecodePrivateKey as _;
 use serde::{Deserialize, Serialize};
@@ -21,7 +20,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::{
     ConfigCheckIssue, Error, Result,
     authenticator::RandomSleeper,
-    util::{GDuration, synth_sleep},
+    util::{AllowRemoteStrict, GDuration, synth_sleep},
 };
 
 const HEADER_CONTENT_DIGEST: HeaderName = HeaderName::from_static("content-digest");
@@ -38,7 +37,7 @@ pub struct Config {
     #[zeroize(skip)]
     pub key_file: PathBuf,
     #[zeroize(skip)]
-    pub allow: Vec<IpNetwork>,
+    pub allow: AllowRemoteStrict,
     #[serde(default = "default_admin_max_time_diff")]
     #[zeroize(skip)]
     pub max_time_diff: GDuration,
@@ -48,7 +47,7 @@ impl Config {
     pub fn new_client<P: AsRef<Path>>(key_file: P) -> Self {
         Self {
             key_file: key_file.as_ref().to_owned(),
-            allow: Vec::new(),
+            allow: <_>::default(),
             max_time_diff: default_admin_max_time_diff(),
         }
     }

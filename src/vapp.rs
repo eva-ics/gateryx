@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, net::IpAddr, path::Path, sync::Arc};
 
-use crate::{ByteResponse, HByteResult, HResult};
+use crate::{ByteResponse, HByteResult, HResult, util::AllowRemoteAny};
 use async_trait::async_trait;
 use http::{Method, Request, Response};
 use http_body_util::{BodyExt as _, Full};
@@ -77,6 +77,7 @@ pub trait VirtualApp: Send + Sync {
     ) -> HByteResult {
         Ok(http_response(404, "Not Found").await)
     }
+    fn verify_ip(&self, ip: IpAddr) -> bool;
 }
 
 const URI_WELL_KNOWN: &str = "/.well-known/";
@@ -84,6 +85,7 @@ const URI_WELL_KNOWN: &str = "/.well-known/";
 pub struct Plain {
     www_root: Static,
     settings: PlainSettings,
+    allow: AllowRemoteAny,
 }
 
 fn default_plain_target_port() -> u16 {
@@ -109,6 +111,7 @@ impl Plain {
     pub fn create<P: AsRef<Path>>(
         path: P,
         settings: Option<serde_json::Value>,
+        allow: AllowRemoteAny,
     ) -> Arc<dyn VirtualApp> {
         let settings = if let Some(s) = settings {
             match serde_json::from_value::<PlainSettings>(s) {
@@ -122,7 +125,11 @@ impl Plain {
             PlainSettings::default()
         };
         let www_root = Static::new(path.as_ref());
-        Arc::new(Self { www_root, settings })
+        Arc::new(Self {
+            www_root,
+            settings,
+            allow,
+        })
     }
     pub fn id() -> &'static str {
         "plain"
@@ -192,6 +199,9 @@ impl VirtualApp for Plain {
             .unwrap();
         Ok(Some(response))
     }
+    fn verify_ip(&self, ip: IpAddr) -> bool {
+        self.allow.verify_ip(ip)
+    }
 }
 
 const URI_WELL_KNOWN_PUBLIC_PEM: &str = "/.well-known/public.pem";
@@ -202,15 +212,16 @@ const URI_SYSTEM_APP_ICON: &str = "/.gateryx/system/app_icon";
 
 pub struct System {
     www_root: Static,
+    allow: AllowRemoteAny,
 }
 
 impl System {
     pub fn id() -> &'static str {
         "system"
     }
-    pub fn create<P: AsRef<Path>>(path: P) -> Arc<dyn VirtualApp> {
+    pub fn create<P: AsRef<Path>>(path: P, allow: AllowRemoteAny) -> Arc<dyn VirtualApp> {
         let www_root = Static::new(path.as_ref());
-        Arc::new(Self { www_root })
+        Arc::new(Self { www_root, allow })
     }
     async fn system_file(&self, request: Request<Full<Bytes>>) -> ByteResponse {
         match self.www_root.clone().serve(request).await {
@@ -302,5 +313,8 @@ impl VirtualApp for System {
                 Full::from(vec![]),
             ))
             .await)
+    }
+    fn verify_ip(&self, ip: IpAddr) -> bool {
+        self.allow.verify_ip(ip)
     }
 }

@@ -12,7 +12,7 @@ use crate::{
     },
     tls::NoCertVerifier,
     tokens::TOKEN_COOKIE_NAME_PREFIX,
-    util::AllowRemote,
+    util::AllowRemoteStrict,
     ws,
 };
 use busrt::{
@@ -44,7 +44,7 @@ pub type Context = Arc<ContextData>;
 pub struct ContextData {
     pub app_map: AppHostMap,
     pub virtual_app_map: Arc<VAppMap>,
-    pub admin_allow_remote: Option<AllowRemote>,
+    pub admin_allow_remote: Option<AllowRemoteStrict>,
     pub auth_www_static: Option<Static>,
     pub primary_host: Option<String>,
     pub token_domain: Option<String>,
@@ -360,7 +360,7 @@ pub async fn prepare_privileged(
         admin_allow_remote: config
             .admin
             .as_ref()
-            .map(|admin_config| AllowRemote::new(&admin_config.allow)),
+            .map(|admin_config| admin_config.allow.clone()),
         primary_host: primary_system_host.clone(),
         auth_www_static: None,
         token_domain: None,

@@ -393,39 +393,37 @@ impl<'de> Deserialize<'de> for GDuration {
     }
 }
 
-pub struct AllowRemote {
-    allow: Arc<Vec<IpNetwork>>,
-    empty_ok: bool,
-}
+#[derive(Deserialize, Serialize, Default)]
+pub struct AllowRemoteStrict(Arc<Vec<IpNetwork>>);
 
-impl AllowRemote {
-    pub fn new(allow: &[IpNetwork]) -> Self {
-        Self {
-            allow: allow.to_owned().into(),
-            empty_ok: false,
-        }
-    }
-    pub fn with_empty_ok(mut self) -> Self {
-        self.empty_ok = true;
-        self
-    }
-}
-
-impl Clone for AllowRemote {
+impl Clone for AllowRemoteStrict {
     fn clone(&self) -> Self {
-        Self {
-            allow: Arc::clone(&self.allow),
-            empty_ok: self.empty_ok,
-        }
+        Self(Arc::clone(&self.0))
     }
 }
 
-impl AllowRemote {
+impl AllowRemoteStrict {
     #[inline]
     pub fn verify_ip(&self, remote_ip: IpAddr) -> bool {
-        if self.allow.is_empty() && self.empty_ok {
+        self.0.iter().any(|net| net.contains(remote_ip))
+    }
+}
+
+#[derive(Deserialize, Serialize, Default)]
+pub struct AllowRemoteAny(Arc<Vec<IpNetwork>>);
+
+impl Clone for AllowRemoteAny {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl AllowRemoteAny {
+    #[inline]
+    pub fn verify_ip(&self, remote_ip: IpAddr) -> bool {
+        if self.0.is_empty() {
             return true;
         }
-        self.allow.iter().any(|net| net.contains(remote_ip))
+        self.0.iter().any(|net| net.contains(remote_ip))
     }
 }
