@@ -249,7 +249,14 @@ impl LdapPool {
             .filter_map(|dn| {
                 dn.split(',')
                     .next()
-                    .and_then(|cn_part| cn_part.strip_prefix("CN="))
+                    .and_then(|cn_part| {
+                        let (key, value) = cn_part.split_once('=')?;
+                        if key.eq_ignore_ascii_case("cn") {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    })
                     .map(ToString::to_string)
             })
             .collect();
