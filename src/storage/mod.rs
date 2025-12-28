@@ -10,7 +10,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
     ConfigCheckIssue, Result,
-    authenticator::UserInfo,
+    authenticator::{GroupInfo, UserInfo},
     util::{GDuration, Numeric},
 };
 
@@ -68,6 +68,16 @@ pub trait Storage: Send + Sync {
     async fn list_users(&self) -> Result<Vec<UserInfo>>;
 
     async fn user_groups(&self, user: &str) -> Result<Vec<String>>;
+
+    async fn list_groups(&self) -> Result<Vec<GroupInfo>>;
+
+    async fn add_group(&self, group: &str) -> Result<()>;
+
+    async fn delete_group(&self, group: &str) -> Result<()>;
+
+    async fn add_user_to_group(&self, user: &str, group: &str) -> Result<()>;
+
+    async fn remove_user_from_group(&self, user: &str, group: &str) -> Result<()>;
 }
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]

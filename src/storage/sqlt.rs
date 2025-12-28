@@ -11,7 +11,10 @@ use sqlx::{
 use sqlx::{Row, SqlitePool};
 use webauthn_rs::prelude::Passkey;
 
-use crate::{Error, Result, authenticator::UserInfo};
+use crate::{
+    Error, Result,
+    authenticator::{GroupInfo, UserInfo},
+};
 
 pub struct Storage {
     pool: SqlitePool,
@@ -69,6 +72,25 @@ impl Storage {
         self.revocation_cache
             .insert(user.to_owned(), Some(not_before));
         Ok(Some(not_before))
+    }
+
+    async fn group_users(&self, group: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            r"
+            SELECT user FROM user_groups
+            WHERE group_name = ?
+            ORDER BY user ASC
+            ",
+        )
+        .bind(group)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut users = Vec::new();
+        for row in rows {
+            let user: String = row.try_get("user")?;
+            users.push(user);
+        }
+        Ok(users)
     }
 }
 
@@ -377,14 +399,89 @@ impl super::Storage for Storage {
         .await?;
         let mut users = Vec::new();
         for row in rows {
+            let login = row.try_get::<String, _>("user")?;
+            let groups = self.user_groups(&login).await?;
             let user = UserInfo {
-                login: row.try_get("user")?,
+                login,
                 active: u8::try_from(row.try_get::<i64, _>("active")?).unwrap_or_default(),
                 created: row.try_get("created")?,
                 last_login: row.try_get("last_login")?,
+                groups,
             };
             users.push(user);
         }
         Ok(users)
+    }
+
+    async fn list_groups(&self) -> Result<Vec<GroupInfo>> {
+        let rows = sqlx::query(
+            r"
+            SELECT name FROM groups ORDER BY name ASC
+            ",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut groups = Vec::new();
+        for row in rows {
+            let name: String = row.try_get("name")?;
+            let users = self.group_users(&name).await?;
+            let group = GroupInfo { name, users };
+            groups.push(group);
+        }
+        Ok(groups)
+    }
+
+    async fn add_group(&self, group: &str) -> Result<()> {
+        sqlx::query(
+            r"
+            INSERT OR REPLACE INTO groups (name)
+            VALUES (?)
+            ",
+        )
+        .bind(group)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_group(&self, group: &str) -> Result<()> {
+        sqlx::query(
+            r"
+            DELETE FROM groups
+            WHERE name = ?
+            ",
+        )
+        .bind(group)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn add_user_to_group(&self, user: &str, group: &str) -> Result<()> {
+        sqlx::query(
+            r"
+            INSERT OR REPLACE INTO user_groups (user, group_name)
+            VALUES (?, ?)
+            ",
+        )
+        .bind(user)
+        .bind(group)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn remove_user_from_group(&self, user: &str, group: &str) -> Result<()> {
+        sqlx::query(
+            r"
+            DELETE FROM user_groups
+            WHERE user = ? AND group_name = ?
+            ",
+        )
+        .bind(user)
+        .bind(group)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }

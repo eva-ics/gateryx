@@ -141,6 +141,7 @@ impl From<Error> for RpcError {
             Error::RpcMethodNotFound(m) => RpcError::new(ERR_CODE_METHOD_NOT_FOUND, Some(m)),
             Error::InvalidData(m) => RpcError::new(ERR_CODE_INVALID_DATA, Some(m)),
             Error::Crypto(m) | Error::Failed(m) => RpcError::new(ERR_CODE_FUNC_FAILED, Some(m)),
+            Error::NotImplemented => RpcError::new(ERR_CODE_FUNC_FAILED, Some("Not implemented")),
             Error::Timeout => RpcError::new(ERR_CODE_FUNC_FAILED, Some("Operation timed out")),
             Error::Database(m) => RpcError::new(ERR_CODE_FUNC_FAILED, Some(m.clone())),
         }

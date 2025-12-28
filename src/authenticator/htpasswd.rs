@@ -31,7 +31,7 @@ struct HtpasswdAuthenticatorInner {
 
 #[async_trait::async_trait]
 impl Authenticator for HtpasswdAuthenticator {
-    async fn groups(&self, _login: &str) -> Result<Vec<String>> {
+    async fn user_groups(&self, _login: &str) -> Result<Vec<String>> {
         Ok(vec![])
     }
     async fn verify(&self, login: &str, password: &str) -> AuthResult {

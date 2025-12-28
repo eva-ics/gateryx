@@ -80,7 +80,7 @@ impl Authenticator for LdapAuthenticator {
             }
         }
     }
-    async fn groups(&self, login: &str) -> Result<Vec<String>> {
+    async fn user_groups(&self, login: &str) -> Result<Vec<String>> {
         self.pool.user_groups(login).await
     }
 }

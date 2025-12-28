@@ -2,9 +2,9 @@ use clap::Parser;
 use colored::Colorize;
 use fs_err::read_to_string;
 use gateryx::{
-    Config, Error, Result, admin,
-    admin::Config as AdminConfig,
-    authenticator::UserInfo,
+    Config, Error, Result,
+    admin::{self, Config as AdminConfig},
+    authenticator::{GroupInfo, UserInfo},
     rpc::{RpcRequest, RpcResponse, URI_RPC, URI_RPC_ADMIN},
     util::GDuration,
 };
@@ -33,6 +33,8 @@ struct Args {
 enum Command {
     Test,
     #[clap(subcommand)]
+    Group(GroupCommand),
+    #[clap(subcommand)]
     User(UserCommand),
     Version,
 }
@@ -44,6 +46,43 @@ enum UserCommand {
     Delete(DeleteUserCommand),
     Password(SetPasswordCommand),
     Invalidate(InvalidateCommand),
+}
+
+#[derive(Parser)]
+enum GroupCommand {
+    List,
+    Create(CreateGroupCommand),
+    Delete(DeleteGroupCommand),
+    AddUser(AddUserToGroupCommand),
+    RemoveUser(RemoveUserFromGroupCommand),
+}
+
+#[derive(Parser)]
+struct CreateGroupCommand {
+    #[clap()]
+    group: String,
+}
+
+#[derive(Parser)]
+struct DeleteGroupCommand {
+    #[clap()]
+    group: String,
+}
+
+#[derive(Parser)]
+struct AddUserToGroupCommand {
+    #[clap()]
+    group: String,
+    #[clap()]
+    user: String,
+}
+
+#[derive(Parser)]
+struct RemoveUserFromGroupCommand {
+    #[clap()]
+    group: String,
+    #[clap()]
+    user: String,
 }
 
 #[derive(Parser)]
@@ -228,6 +267,21 @@ impl TryFrom<ConfigVariant> for ClientConfig {
     }
 }
 
+fn create_table() -> Table {
+    let mut table = Table::new();
+    table.set_format(
+        prettytable::format::FormatBuilder::new()
+            .borders(' ')
+            .column_separator(' ')
+            .separator(
+                prettytable::format::LinePosition::Title,
+                prettytable::format::LineSeparator::new('-', '-', '-', '-'),
+            )
+            .build(),
+    );
+    table
+}
+
 #[allow(clippy::too_many_lines)]
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -285,27 +339,53 @@ async fn main() -> Result<()> {
             let _: Empty = client.call("admin.test", serde_json::json!({})).await?;
             ok!();
         }
+        Command::Group(group_cmd) => match group_cmd {
+            GroupCommand::List => {
+                let groups: Vec<GroupInfo> = client.call("admin.group.list", ()).await?;
+                to_json!(groups);
+                let mut table = create_table();
+                table.set_titles(row!["Group", "Users"]);
+                for group in groups {
+                    table.add_row(row![group.name, group.users.join(",")]);
+                }
+                table.printstd();
+            }
+            GroupCommand::Create(CreateGroupCommand { group }) => {
+                let params = serde_json::json!({ "group": group });
+                let _: () = client.call("admin.group.create", params).await?;
+                ok!();
+            }
+            GroupCommand::Delete(DeleteGroupCommand { group }) => {
+                let params = serde_json::json!({ "group": group });
+                let _: () = client.call("admin.group.delete", params).await?;
+                ok!();
+            }
+            GroupCommand::AddUser(AddUserToGroupCommand { group, user }) => {
+                let params = serde_json::json!({ "group": group,
+                    "user": user
+                });
+                let _: () = client.call("admin.group.add_user", params).await?;
+                ok!();
+            }
+            GroupCommand::RemoveUser(RemoveUserFromGroupCommand { group, user }) => {
+                let params = serde_json::json!({ "group": group,
+                    "user": user
+                });
+                let _: () = client.call("admin.group.remove_user", params).await?;
+                ok!();
+            }
+        },
         Command::User(user_cmd) => match user_cmd {
             UserCommand::List => {
                 let users: Vec<UserInfo> = client.call("admin.user.list", ()).await?;
                 to_json!(users);
-                // prettytable with headers and no separators between rows and columns
-                let mut table = Table::new();
-                table.set_format(
-                    prettytable::format::FormatBuilder::new()
-                        .borders(' ') // no borders
-                        .column_separator(' ') // no column lines
-                        .separator(
-                            prettytable::format::LinePosition::Title,
-                            prettytable::format::LineSeparator::new('-', '-', '-', '-'),
-                        )
-                        .build(),
-                );
-                table.set_titles(row!["User", "Act", "Created", "Last Login"]);
+                let mut table = create_table();
+                table.set_titles(row!["User", "Act", "Groups", "Created", "Last Login"]);
                 for user in users {
                     table.add_row(row![
                         user.login,
                         if user.active == 0 { "" } else { "Y" },
+                        user.groups.join(","),
                         user.created
                             .try_into_datetime_local()
                             .unwrap()
