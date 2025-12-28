@@ -17,6 +17,8 @@ pub enum Error {
     Io(String),
     #[error("Failed: {0}")]
     Failed(String),
+    #[error("Not implemented")]
+    NotImplemented,
     #[error("Crypto engine error: {0}")]
     Crypto(String),
     #[error("Access denied: {0}")]

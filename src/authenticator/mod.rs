@@ -87,6 +87,13 @@ pub struct UserInfo {
     pub active: u8,
     pub created: Timestamp,
     pub last_login: Timestamp,
+    pub groups: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GroupInfo {
+    pub name: String,
+    pub users: Vec<String>,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -147,6 +154,9 @@ impl Authenticator for DummyAuthenticator {
     }
     async fn verify(&self, _login: &str, _password: &str) -> AuthResult {
         AuthResult::Failure
+    }
+    async fn user_groups(&self, _login: &str) -> Result<Vec<String>> {
+        Ok(vec![])
     }
 }
 
@@ -225,25 +235,26 @@ impl AuthenticatorConfig {
 }
 
 pub enum AuthResult {
-    Success,
+    Success { groups: Vec<String> },
     Failure,
 }
 
 #[async_trait::async_trait]
 pub trait Authenticator: Send + Sync {
     async fn present(&self, login: &str) -> bool;
+    async fn user_groups(&self, login: &str) -> Result<Vec<String>>;
     async fn verify(&self, login: &str, password: &str) -> AuthResult;
     async fn add(&self, _login: &str, _password: &str) -> Result<()> {
-        Err(Error::failed("not implemented"))
+        Err(Error::NotImplemented)
     }
     async fn spawn_secure_workers(&self) -> Result<()> {
         Ok(())
     }
-    async fn remove(&self, _login: &str) -> Result<()> {
-        Err(Error::failed("not implemented"))
+    async fn delete(&self, _login: &str) -> Result<()> {
+        Err(Error::NotImplemented)
     }
     async fn set_password_forced(&self, _login: &str, _password: &str) -> Result<()> {
-        Err(Error::failed("not implemented"))
+        Err(Error::NotImplemented)
     }
     async fn set_password(
         &self,
@@ -251,13 +262,31 @@ pub trait Authenticator: Send + Sync {
         old_password: &str,
         new_password: &str,
     ) -> Result<()> {
-        if !matches!(self.verify(login, old_password).await, AuthResult::Success) {
+        if !matches!(
+            self.verify(login, old_password).await,
+            AuthResult::Success { .. }
+        ) {
             return Err(Error::failed("authentication failed"));
         }
         self.set_password_forced(login, new_password).await
     }
     async fn list(&self) -> Result<Vec<UserInfo>> {
-        Err(Error::failed("not implemented"))
+        Err(Error::NotImplemented)
+    }
+    async fn list_groups(&self) -> Result<Vec<GroupInfo>> {
+        Err(Error::NotImplemented)
+    }
+    async fn add_group(&self, _name: &str) -> Result<()> {
+        Err(Error::NotImplemented)
+    }
+    async fn delete_group(&self, _name: &str) -> Result<()> {
+        Err(Error::NotImplemented)
+    }
+    async fn add_user_to_group(&self, _login: &str, _group: &str) -> Result<()> {
+        Err(Error::NotImplemented)
+    }
+    async fn remove_user_from_group(&self, _login: &str, _group: &str) -> Result<()> {
+        Err(Error::NotImplemented)
     }
 }
 

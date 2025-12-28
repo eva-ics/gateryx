@@ -4,7 +4,10 @@ use bma_ts::Timestamp;
 use tracing::warn;
 use webauthn_rs::prelude::Passkey;
 
-use crate::{Error, Result, authenticator::UserInfo};
+use crate::{
+    Error, Result,
+    authenticator::{GroupInfo, UserInfo},
+};
 
 #[derive(Default)]
 pub struct Storage {}
@@ -62,5 +65,33 @@ impl super::Storage for Storage {
 
     async fn list_users(&self) -> Result<Vec<UserInfo>> {
         Ok(Vec::new())
+    }
+
+    async fn user_groups(&self, _user: &str) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
+
+    async fn list_groups(&self) -> Result<Vec<GroupInfo>> {
+        Ok(vec![])
+    }
+
+    async fn add_group(&self, _group: &str) -> Result<()> {
+        Err(Error::failed(
+            "Group management is not supported with Dummy storage",
+        ))
+    }
+
+    async fn delete_group(&self, _group: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn add_user_to_group(&self, _user: &str, _group: &str) -> Result<()> {
+        Err(Error::failed(
+            "Group management is not supported with Dummy storage",
+        ))
+    }
+
+    async fn remove_user_from_group(&self, _user: &str, _group: &str) -> Result<()> {
+        Ok(())
     }
 }

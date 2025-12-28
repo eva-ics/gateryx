@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, net::IpAddr, path::Path, sync::Arc};
 
-use crate::{ByteResponse, HByteResult, HResult, util::AllowRemoteAny};
+use crate::{ByteResponse, HByteResult, HResult, tokens::ClaimsView, util::AllowRemoteAny};
 use async_trait::async_trait;
 use http::{Method, Request, Response};
 use http_body_util::{BodyExt as _, Full};
@@ -73,6 +73,7 @@ pub trait VirtualApp: Send + Sync {
         _request: Request<Incoming>,
         _remote_ip: IpAddr,
         _with_tls: bool,
+        _claims: Option<&ClaimsView>,
         _context: &Context,
     ) -> HByteResult {
         Ok(http_response(404, "Not Found").await)
@@ -282,10 +283,21 @@ impl VirtualApp for System {
         request: Request<Incoming>,
         _remote_ip: IpAddr,
         _with_tls: bool,
+        claims: Option<&ClaimsView>,
         context: &Context,
     ) -> HByteResult {
         if request.uri().path() == URI_SYSTEM_APPS_JSON {
-            let apps = context.app_map.apps().await;
+            let apps = context
+                .app_map
+                .apps()
+                .await
+                .into_iter()
+                .filter(|app| {
+                    app.allow_groups.is_empty()
+                        || claims
+                            .is_some_and(|c| c.groups.iter().any(|g| app.allow_groups.contains(g)))
+                })
+                .collect::<Vec<_>>();
             let domain = context.token_domain.as_deref();
             return Ok(
                 http_ser_json_response(serde_json::json!({"apps": apps, "domain": domain})).await,

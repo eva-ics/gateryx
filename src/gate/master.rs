@@ -130,8 +130,13 @@ impl MasterHandlers {
         {
             return Ok(AuthResponse::InvalidCredentials(None));
         }
+        let groups = if let Some(ref auth) = self.context.authenticator {
+            auth.user_groups(&user).await?
+        } else {
+            vec![]
+        };
         self.context.report_auth_success(remote_ip, &user);
-        let (token_str, exp) = token_factory.issue(&user, vec![], None)?;
+        let (token_str, exp) = token_factory.issue(&user, groups, vec![], None)?;
         Ok(AuthResponse::Success((token_str, user, exp)))
     }
     async fn authenticate(&self, p: AuthPayload, remote_ip: IpAddr) -> Result<AuthResponse> {
@@ -157,7 +162,7 @@ impl MasterHandlers {
             return Ok(AuthResponse::AuthNotEnabled);
         };
         match auth.verify(&p.user, &p.password).await {
-            crate::authenticator::AuthResult::Success => {
+            crate::authenticator::AuthResult::Success { groups } => {
                 if !self.verify_captcha(
                     p.captcha_id.as_deref(),
                     p.captcha_str.as_deref(),
@@ -166,7 +171,7 @@ impl MasterHandlers {
                     maybe_need_captcha!(true);
                 }
                 self.context.report_auth_success(remote_ip, &p.user);
-                let (token_str, exp) = factory.issue(&p.user, vec![], None)?;
+                let (token_str, exp) = factory.issue(&p.user, groups, vec![], None)?;
                 Ok(AuthResponse::Success((token_str, p.user.clone(), exp)))
             }
             crate::authenticator::AuthResult::Failure => {
@@ -252,6 +257,11 @@ impl MasterHandlers {
         params: Value,
         _remote_ip: IpAddr,
     ) -> Result<Value> {
+        macro_rules! auth_not_configured {
+            () => {
+                return Err(Error::failed("Authenticator not configured"));
+            };
+        }
         match method {
             "admin.test" => Ok(serde_json::json!({"ok": true})),
             "admin.invalidate" => {
@@ -262,7 +272,7 @@ impl MasterHandlers {
                 }
                 let p: Params = serde_json::from_value(params)?;
                 let Some(ref factory) = self.context.token_factory else {
-                    return Err(Error::failed("Authentication not enabled"));
+                    auth_not_configured!();
                 };
                 let expires = p.expires.unwrap_or(factory.max_expiration_seconds());
                 self.context
@@ -278,12 +288,11 @@ impl MasterHandlers {
                     password: String,
                 }
                 let p: Params = serde_json::from_value(params)?;
-                if let Some(ref auth) = self.context.authenticator {
-                    auth.add(&p.user, &p.password).await?;
-                    Ok(Value::Null)
-                } else {
-                    Err(Error::failed("Authenticator not configured"))
-                }
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                auth.add(&p.user, &p.password).await?;
+                Ok(Value::Null)
             }
             "admin.user.delete" => {
                 #[derive(Deserialize)]
@@ -291,30 +300,28 @@ impl MasterHandlers {
                     user: String,
                 }
                 let p: Params = serde_json::from_value(params)?;
-                if let Some(ref auth) = self.context.authenticator {
-                    auth.remove(&p.user).await?;
-                    if let Some(ref factory) = self.context.token_factory {
-                        self.context
-                            .storage
-                            .invalidate(
-                                &p.user,
-                                Duration::from_secs(factory.max_expiration_seconds()),
-                            )
-                            .await?;
-                    }
-                    self.context.storage.delete_passkey(&p.user).await?;
-                    Ok(Value::Null)
-                } else {
-                    Err(Error::failed("Authenticator not configured"))
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                auth.delete(&p.user).await?;
+                if let Some(ref factory) = self.context.token_factory {
+                    self.context
+                        .storage
+                        .invalidate(
+                            &p.user,
+                            Duration::from_secs(factory.max_expiration_seconds()),
+                        )
+                        .await?;
                 }
+                self.context.storage.delete_passkey(&p.user).await?;
+                Ok(Value::Null)
             }
             "admin.user.list" => {
-                if let Some(ref auth) = self.context.authenticator {
-                    let users = auth.list().await?;
-                    Ok(to_value(users)?)
-                } else {
-                    Err(Error::failed("Authenticator not configured"))
-                }
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                let users = auth.list().await?;
+                Ok(to_value(users)?)
             }
             "admin.user.set_password" => {
                 #[derive(Deserialize)]
@@ -323,21 +330,77 @@ impl MasterHandlers {
                     password: String,
                 }
                 let p: Params = serde_json::from_value(params)?;
-                if let Some(ref auth) = self.context.authenticator {
-                    auth.set_password_forced(&p.user, &p.password).await?;
-                    if let Some(ref factory) = self.context.token_factory {
-                        self.context
-                            .storage
-                            .invalidate(
-                                &p.user,
-                                Duration::from_secs(factory.max_expiration_seconds()),
-                            )
-                            .await?;
-                    }
-                    Ok(Value::Null)
-                } else {
-                    Err(Error::failed("Authenticator not configured"))
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                auth.set_password_forced(&p.user, &p.password).await?;
+                if let Some(ref factory) = self.context.token_factory {
+                    self.context
+                        .storage
+                        .invalidate(
+                            &p.user,
+                            Duration::from_secs(factory.max_expiration_seconds()),
+                        )
+                        .await?;
                 }
+                Ok(Value::Null)
+            }
+            "admin.group.list" => {
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                let groups = auth.list_groups().await?;
+                Ok(to_value(groups)?)
+            }
+            "admin.group.create" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    group: String,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                auth.add_group(&p.group).await?;
+                Ok(Value::Null)
+            }
+            "admin.group.delete" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    group: String,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                auth.delete_group(&p.group).await?;
+                Ok(Value::Null)
+            }
+            "admin.group.add_user" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    user: String,
+                    group: String,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                auth.add_user_to_group(&p.user, &p.group).await?;
+                Ok(Value::Null)
+            }
+            "admin.group.remove_user" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    user: String,
+                    group: String,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                let Some(ref auth) = self.context.authenticator else {
+                    auth_not_configured!();
+                };
+                auth.remove_user_from_group(&p.user, &p.group).await?;
+                Ok(Value::Null)
             }
             _ => Err(Error::RpcMethodNotFound(format!(
                 "Admin RPC method '{}' not found",
@@ -424,7 +487,8 @@ impl RpcHandlers for MasterHandlers {
                     return Err(Error::invalid_data("Audience list is empty").into());
                 }
                 let sleeper = RandomSleeper::new(100..300);
-                let (token, _token_exp) = token_factory.issue(&claims.sub, apps, Some(exp))?;
+                let (token, _token_exp) =
+                    token_factory.issue(&claims.sub, vec![], apps, Some(exp))?;
                 sleeper.sleep().await;
                 Ok(Some(pack(token)?))
             }

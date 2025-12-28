@@ -63,7 +63,14 @@ impl Authenticator for LdapAuthenticator {
         match self.pool.verify_password(login, password).await {
             Ok(()) => {
                 random_sleeper.sleep().await;
-                AuthResult::Success
+                let groups = match self.pool.user_groups(login).await {
+                    Ok(g) => g,
+                    Err(e) => {
+                        error!(%e, "error fetching user groups");
+                        return AuthResult::Failure;
+                    }
+                };
+                AuthResult::Success { groups }
             }
             Err(e) => {
                 random_sleeper.sleep().await;
@@ -72,6 +79,9 @@ impl Authenticator for LdapAuthenticator {
                 AuthResult::Failure
             }
         }
+    }
+    async fn user_groups(&self, login: &str) -> Result<Vec<String>> {
+        self.pool.user_groups(login).await
     }
 }
 
@@ -160,6 +170,17 @@ impl LdapPool {
             config: config.clone(),
         }
     }
+    async fn ldap_user(&self, user: &str, ldap: &mut Ldap) -> Result<String> {
+        Ok(if user.contains('@') {
+            format!(
+                "cn={},{}",
+                ldap.get_user_by_email(user).await?,
+                self.config.path
+            )
+        } else {
+            format!("cn={},{}", user, self.config.path)
+        })
+    }
     async fn start_connector(&self) {
         let connector = tokio::spawn({
             let ldap_pool = self.pool.clone();
@@ -198,6 +219,49 @@ impl LdapPool {
         };
         Ok(pool)
     }
+    async fn user_groups(&self, user: &str) -> Result<Vec<String>> {
+        let res = tokio::time::timeout(self.timeout, self.user_groups_impl(user)).await??;
+        Ok(res)
+    }
+    async fn user_groups_impl(&self, user: &str) -> Result<Vec<String>> {
+        let pool = self.get_pool().await?;
+        let mut ldap = pool.get().await;
+        let attrs = vec!["memberOf"];
+        let ldap_user = self.ldap_user(user, &mut ldap).await?;
+        let (rs, _) = ldap
+            .inner
+            .search(&ldap_user, ldap3::Scope::Base, "(objectClass=*)", attrs)
+            .await
+            .map_err(Error::failed)?
+            .success()
+            .map_err(Error::failed)?;
+        if rs.is_empty() {
+            return Ok(vec![]);
+        }
+        let se = SearchEntry::construct(
+            rs.into_iter()
+                .next()
+                .ok_or_else(|| Error::failed("No search entry found"))?,
+        );
+        let member_of = se.attrs.get("memberOf").cloned().unwrap_or_default();
+        let groups = member_of
+            .into_iter()
+            .filter_map(|dn| {
+                dn.split(',')
+                    .next()
+                    .and_then(|cn_part| {
+                        let (key, value) = cn_part.split_once('=')?;
+                        if key.eq_ignore_ascii_case("cn") {
+                            Some(value)
+                        } else {
+                            None
+                        }
+                    })
+                    .map(ToString::to_string)
+            })
+            .collect();
+        Ok(groups)
+    }
     async fn user_present(&self, user: &str) -> Result<bool> {
         let res = tokio::time::timeout(self.timeout, self.user_present_impl(user)).await??;
         Ok(res)
@@ -213,15 +277,7 @@ impl LdapPool {
                 attrs.push("ak-active");
             }
         }
-        let ldap_user = if user.contains('@') {
-            format!(
-                "cn={},{}",
-                ldap.get_user_by_email(user).await?,
-                self.config.path
-            )
-        } else {
-            format!("cn={},{}", user, self.config.path)
-        };
+        let ldap_user = self.ldap_user(user, &mut ldap).await?;
         let (rs, _) = ldap
             .inner
             .search(&ldap_user, ldap3::Scope::Base, "(objectClass=*)", attrs)

@@ -31,6 +31,9 @@ struct HtpasswdAuthenticatorInner {
 
 #[async_trait::async_trait]
 impl Authenticator for HtpasswdAuthenticator {
+    async fn user_groups(&self, _login: &str) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
     async fn verify(&self, login: &str, password: &str) -> AuthResult {
         let random_sleeper = RandomSleeper::new(100..300);
         match self.verify_password(login, password).await {
@@ -73,7 +76,7 @@ impl HtpasswdAuthenticator {
             if !bcrypt::verify(password, hash).unwrap_or(false) {
                 return Ok(AuthResult::Failure);
             }
-            return Ok(AuthResult::Success);
+            return Ok(AuthResult::Success { groups: vec![] });
         }
         Ok(AuthResult::Failure)
     }

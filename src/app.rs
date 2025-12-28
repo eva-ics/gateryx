@@ -43,6 +43,8 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub allow_tokens: bool,
     #[serde(default)]
+    pub allow_groups: Vec<String>,
+    #[serde(default)]
     pub url: String,
     #[zeroize(skip)]
     pub icon: Option<PathBuf>,
@@ -190,6 +192,8 @@ pub struct AppView {
     has_icon: bool,
     allow_tokens: bool,
     url: String,
+    #[serde(skip)]
+    pub allow_groups: Vec<String>,
 }
 
 impl AppHostMapInner {
@@ -212,6 +216,7 @@ impl AppHostMapInner {
                         has_icon: config.icon.is_some(),
                         allow_tokens: config.allow_tokens,
                         url: config.url.clone(),
+                        allow_groups: config.allow_groups.clone(),
                     })
                 }
             })
