@@ -303,7 +303,12 @@ impl MasterHandlers {
                 let Some(ref auth) = self.context.authenticator else {
                     auth_not_configured!();
                 };
-                auth.delete(&p.user).await?;
+                if let Err(e) = auth.delete(&p.user).await
+                    && !matches!(e, Error::NotImplemented)
+                    && !matches!(e, Error::NotFound(_))
+                {
+                    return Err(e);
+                }
                 if let Some(ref factory) = self.context.token_factory {
                     self.context
                         .storage
