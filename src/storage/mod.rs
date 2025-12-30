@@ -9,12 +9,13 @@ use webauthn_rs::prelude::Passkey;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
-    ConfigCheckIssue, Result,
+    ConfigCheckIssue, Error, Result,
     authenticator::{GroupInfo, UserInfo},
     util::{GDuration, Numeric},
 };
 
 mod dummy;
+mod postgres;
 mod sqlt;
 
 #[async_trait]
@@ -92,9 +93,9 @@ pub struct Config {
 impl Config {
     pub fn check(&self, _work_dir: &Path) -> Vec<ConfigCheckIssue> {
         let mut issues = Vec::new();
-        if !self.uri.starts_with("sqlite://") {
+        if !self.uri.starts_with("sqlite://") && !self.uri.starts_with("postgres://") {
             issues.push(ConfigCheckIssue::Error(
-                "Only sqlite storage is supported".to_string(),
+                "Only sqlite and postgres storage are supported".to_string(),
             ));
         }
         if u32::from(self.pool_size) == 0 {
@@ -115,5 +116,11 @@ pub async fn create(config: Option<&Config>) -> Result<Arc<dyn Storage + Send + 
     let Some(config) = config else {
         return Ok(Arc::new(dummy::Storage::default()));
     };
-    Ok(Arc::new(sqlt::Storage::create(config).await?))
+    if config.uri.starts_with("postgres://") {
+        return Ok(Arc::new(postgres::Storage::create(config).await?));
+    }
+    if config.uri.starts_with("sqlite://") {
+        return Ok(Arc::new(sqlt::Storage::create(config).await?));
+    }
+    Err(Error::failed("Unsupported storage type"))
 }

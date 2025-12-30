@@ -97,9 +97,10 @@ user = "gateryx"
 #max_message_size = "40m"
 #max_frame_size = "40m"
 
-# only SQLite is supported currently, PostgreSQL suport is coming very soon
+# SQLite / PostgreSQL
 [db]
 uri = "sqlite:///var/gateryx/db/gateryx.db"
+#uri = "postgres://gateryx:xxx@192.168.1.1/gateryx"
 pool_size = 10
 timeout = 5
 
