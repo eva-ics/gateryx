@@ -570,24 +570,48 @@ async fn handle_http_request(
             .parse()
             .unwrap(),
     );
-    if app.client.insert_gateryx_headers() {
+    let is_websocket = request
+        .headers()
+        .get("upgrade")
+        .is_some_and(|v| v == "websocket");
+    if app.client.insert_gateryx_headers()
+        && (!is_websocket || app.websocket.as_ref().is_some_and(|w| !w.strict))
+    {
+        request.headers_mut().insert(
+            &context.headers.real_ip,
+            remote_ip.to_string().parse().unwrap(),
+        );
         if let Some(sub) = token_sub
             && let Ok(s) = sub.parse()
         {
             request.headers_mut().insert(&context.headers.user, s);
-            request.headers_mut().insert(
-                &context.headers.real_ip,
-                remote_ip.to_string().parse().unwrap(),
-            );
         }
         insert_jwt_assertion(jwt_token.as_deref(), &mut request, context);
     }
-    if request
-        .headers()
-        .get("upgrade")
-        .is_some_and(|v| v == "websocket")
-    {
-        let mut response = ws::handle(
+    if is_websocket {
+        if app.websocket.as_ref().is_some_and(|w| w.strict) {
+            downgrade_to_http11(&mut request, false);
+            let (mut parts, body) = request.into_parts();
+            let mut headers = http::HeaderMap::new();
+            const ALLOWED_HEADERS: &[&str] = &[
+                "sec-websocket-key",
+                "sec-websocket-version",
+                "sec-websocket-protocol",
+                "host",
+                "connection",
+                "upgrade",
+                "cookie",
+                "origin",
+            ];
+            for h in ALLOWED_HEADERS {
+                if let Some(v) = parts.headers.remove(*h) {
+                    headers.insert(*h, v);
+                }
+            }
+            parts.headers = headers;
+            request = Request::from_parts(parts, body);
+        }
+        let response = ws::handle(
             request,
             claims,
             remote_ip,
@@ -597,9 +621,6 @@ async fn handle_http_request(
             worker_pool,
         )
         .await;
-        response
-            .headers_mut()
-            .insert(&context.headers.via, "Gateryx".parse().unwrap());
         return Ok(response);
     }
     let (mut parts, body) = request.into_parts();
@@ -623,9 +644,7 @@ async fn handle_http_request(
     };
     match app.client {
         crate::app::AppClientKind::Http0 => {
-            if http2 {
-                downgrade_to_http11(&mut request, false);
-            }
+            downgrade_to_http11(&mut request, false);
             // remove unsafe http/1.1 headers
             request.headers_mut().remove(header::ACCEPT_ENCODING);
             request

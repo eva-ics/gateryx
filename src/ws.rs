@@ -50,6 +50,8 @@ pub struct Config {
     pub max_message_size: Numeric,
     #[serde(default = "default_websocket_max_frame_size")]
     pub max_frame_size: Numeric,
+    #[serde(default)]
+    pub strict: bool,
 }
 
 impl Default for Config {
@@ -59,6 +61,7 @@ impl Default for Config {
             write_buffer: default_websocket_write_buffer_size(),
             max_message_size: default_websocket_max_message_size(),
             max_frame_size: default_websocket_max_frame_size(),
+            strict: false,
         }
     }
 }
@@ -130,7 +133,10 @@ async fn init_ws(
     app: &AppConfig,
     context: &Context,
 ) -> std::result::Result<
-    WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    (
+        WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
     tokio_tungstenite::tungstenite::Error,
 > {
     let ws_config: WebSocketConfig = app
@@ -153,7 +159,6 @@ async fn init_ws(
             Some(connector),
         )
         .await
-        .map(|(ws_stream, _)| ws_stream)
     } else {
         tokio_tungstenite::client_async_tls_with_config(
             ws_request,
@@ -162,87 +167,19 @@ async fn init_ws(
             None,
         )
         .await
-        .map(|(ws_stream, _)| ws_stream)
     }
 }
 
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 async fn proxy_ws_with_headers(
     client_ws: WebSocketStream<TokioIo<Upgraded>>,
+    server_ws: WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
     claims: Option<ClaimsView>,
     remote_ip: IpAddr,
-    uri: Uri,
-    headers: HeaderMap,
-    remote_uri: Uri,
     app: Arc<AppConfig>,
     context: Context,
 ) -> tokio::io::Result<()> {
-    let (scheme, port) = if remote_uri.scheme_str() == Some("https") {
-        ("wss", remote_uri.port_u16().unwrap_or(443))
-    } else {
-        ("ws", remote_uri.port_u16().unwrap_or(80))
-    };
-    let Some(authority) = remote_uri.authority() else {
-        error!(ip = %remote_ip, "Remote URI missing authority");
-        return Err(tokio::io::Error::new(
-            tokio::io::ErrorKind::InvalidInput,
-            "Remote URI missing authority",
-        ));
-    };
-    let upstream_uri = format!(
-        "{}://{}{}",
-        scheme,
-        authority.host(),
-        uri.path_and_query().map_or("", |pq| pq.as_str())
-    );
-    info!(ip=%remote_ip, upstream_uri, "Proxying WebSocket to upstream",);
-    if app.skip_remote_tls_verify {
-        debug!(ip = %remote_ip, upstream_uri, "Using dangerous TLS config to skip remote TLS verification");
-    }
-
-    let mut req_builder = Request::builder().method("GET").uri(upstream_uri);
-
-    for (key, value) in &headers {
-        req_builder = req_builder.header(key, value);
-    }
-
-    let Ok(ws_request) = req_builder.body(()) else {
-        error!(ip = %remote_ip, "Failed to build WebSocket request");
-        return Err(tokio::io::Error::new(
-            tokio::io::ErrorKind::InvalidInput,
-            "Failed to build WebSocket request",
-        ));
-    };
-
-    let tcp_stream = TcpStream::connect((authority.host(), port)).await?;
-    //tcp_stream.set_nodelay(true)?;
-
-    debug!(ip = %remote_ip, ws_request = ?ws_request, "Requesting upstream WebSocket server");
-
     let timeout = Duration::from(app.timeout);
-
-    let server_ws = match tokio::time::timeout(
-        timeout,
-        init_ws(ws_request, tcp_stream, &app, &context),
-    )
-    .await
-    {
-        Ok(Ok(res)) => res,
-        Ok(Err(e)) => {
-            error!(
-                ip = %remote_ip,
-                error = %e, "Failed to connect to upstream WebSocket server");
-            return Err(tokio::io::Error::other(e));
-        }
-        Err(e) => {
-            error!(
-                ip = %remote_ip,
-                error = %e, "Timeout connecting to upstream WebSocket server");
-            return Err(tokio::io::Error::new(tokio::io::ErrorKind::TimedOut, e));
-        }
-    };
-
-    debug!(ip = %remote_ip, "Connected to upstream WebSocket server");
 
     let (mut client_sink, mut client_stream) = client_ws.split();
     let (mut server_sink, mut server_stream) = server_ws.split();
@@ -318,13 +255,98 @@ async fn proxy_ws_with_headers(
     };
 
     tokio::select! {
-        () = client_to_server => {},
-        () = server_to_client => {},
+        () = client_to_server => {
+            debug!(ip = %remote_ip, "client to server WebSocket proxying ended");
+        },
+        () = server_to_client => {
+            debug!(ip = %remote_ip, "server to client WebSocket proxying ended");
+        },
     }
 
     debug!(ip = %remote_ip, "WebSocket proxying ended");
 
     Ok(())
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+async fn connect_app_ws(
+    remote_ip: IpAddr,
+    uri: Uri,
+    headers: HeaderMap,
+    remote_uri: Uri,
+    app: Arc<AppConfig>,
+    context: Context,
+) -> tokio::io::Result<(
+    WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    tokio_tungstenite::tungstenite::handshake::client::Response,
+)> {
+    let (scheme, port) = if remote_uri.scheme_str() == Some("https") {
+        ("wss", remote_uri.port_u16().unwrap_or(443))
+    } else {
+        ("ws", remote_uri.port_u16().unwrap_or(80))
+    };
+    let Some(authority) = remote_uri.authority() else {
+        error!(ip = %remote_ip, "Remote URI missing authority");
+        return Err(tokio::io::Error::new(
+            tokio::io::ErrorKind::InvalidInput,
+            "Remote URI missing authority",
+        ));
+    };
+    let upstream_uri = format!(
+        "{}://{}{}",
+        scheme,
+        authority.host(),
+        uri.path_and_query().map_or("", |pq| pq.as_str())
+    );
+    info!(ip=%remote_ip, upstream_uri, "Proxying WebSocket to upstream",);
+    if app.skip_remote_tls_verify {
+        debug!(ip = %remote_ip, upstream_uri, "Using dangerous TLS config to skip remote TLS verification");
+    }
+
+    let mut req_builder = Request::builder().method("GET").uri(upstream_uri);
+
+    for (key, value) in &headers {
+        req_builder = req_builder.header(key, value);
+    }
+
+    let Ok(ws_request) = req_builder.body(()) else {
+        error!(ip = %remote_ip, "Failed to build WebSocket request");
+        return Err(tokio::io::Error::new(
+            tokio::io::ErrorKind::InvalidInput,
+            "Failed to build WebSocket request",
+        ));
+    };
+
+    let tcp_stream = TcpStream::connect((authority.host(), port)).await?;
+    //tcp_stream.set_nodelay(true)?;
+
+    debug!(ip = %remote_ip, ws_request = ?ws_request, "Requesting upstream WebSocket server");
+
+    let timeout = Duration::from(app.timeout);
+
+    let (server_ws, resp) = match tokio::time::timeout(
+        timeout,
+        init_ws(ws_request, tcp_stream, &app, &context),
+    )
+    .await
+    {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            error!(
+                ip = %remote_ip,
+                error = %e, "Failed to connect to upstream WebSocket server");
+            return Err(tokio::io::Error::other(e));
+        }
+        Err(e) => {
+            error!(
+                ip = %remote_ip,
+                error = %e, "Timeout connecting to upstream WebSocket server");
+            return Err(tokio::io::Error::new(tokio::io::ErrorKind::TimedOut, e));
+        }
+    };
+
+    debug!(ip = %remote_ip, "Connected to upstream WebSocket server");
+    Ok((server_ws, resp))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -349,14 +371,40 @@ pub async fn handle(
             return http_internal_server_error().await;
         };
 
-        // Spawn a task to handle it
+        // Connect to upstream WebSocket server
+        let (server_ws, mut server_response) = match tokio::time::timeout(
+            timeout,
+            connect_app_ws(
+                remote_ip,
+                uri.clone(),
+                headers.clone(),
+                remote_uri.clone(),
+                app.clone(),
+                context.clone(),
+            ),
+        )
+        .await
+        {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => {
+                error!(
+                    ip = %remote_ip,
+                    error = %e, "Failed to connect to upstream WebSocket server");
+                return http_response(502, "Failed to connect to upstream WebSocket server").await;
+            }
+            Err(e) => {
+                error!(
+                    ip = %remote_ip,
+                    error = %e, "Timeout connecting to upstream WebSocket server");
+                return http_response(504, "Timeout connecting to upstream WebSocket server").await;
+            }
+        };
+
         if let Err(e) = Box::pin(worker_pool.0.spawn(async move {
             match tokio::time::timeout(timeout, websocket).await {
                 Ok(Ok(ws)) => {
-                    if let Err(e) = proxy_ws_with_headers(
-                        ws, claims, remote_ip, uri, headers, remote_uri, app, context,
-                    )
-                    .await
+                    if let Err(e) =
+                        proxy_ws_with_headers(ws, server_ws, claims, remote_ip, app, context).await
                     {
                         error!(
                             ip = %remote_ip,
@@ -383,8 +431,16 @@ pub async fn handle(
             return http_response(500, "Failed to spawn WebSocket handling task").await;
         }
 
-        let (parts, body) = response.into_parts();
-        Response::from_parts(parts, body.map_err(|e| Box::new(e) as StdError).boxed())
+        let (mut parts, body) = response.into_parts();
+        if let Some(val) = server_response
+            .headers_mut()
+            .remove("Sec-WebSocket-Protocol")
+        {
+            parts.headers.insert("Sec-WebSocket-Protocol", val);
+        }
+        let resp = Response::from_parts(parts, body.map_err(|e| Box::new(e) as StdError).boxed());
+        debug!(ip = %remote_ip, response = ?resp, "WebSocket upgrade successful");
+        resp
     } else {
         error!(
         ip = %remote_ip,
