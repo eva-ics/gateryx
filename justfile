@@ -47,6 +47,10 @@ prepare-docker:
     docker buildx inspect --bootstrap
     docker run --privileged --rm tonistiigi/binfmt --install all
 
+tag:
+    git tag -a v{{VERSION}} -m v{{VERSION}}
+    git push origin --tags
+
 pub-docker:
   cd docker && rm -rf _build && mkdir _build
   cd docker && cp ../make-deb/gateryx-server-{{ VERSION }}-arm64.deb ./_build/gateryx-server-arm64.deb
