@@ -59,7 +59,7 @@ Package: gateryx-client
 Version: ${VERSION}
 Section: base
 Priority: optional
-Depends: libc6 (>= 2.35), libssl3, openssl, ca-certificates
+Depends: libc6 (>= 2.35), libssl3, ca-certificates
 Architecture: ${DEB_ARCH}
 Maintainer: Serhij S. <div@altertech.com>
 Description: WAF for IoT and Industrial applications
