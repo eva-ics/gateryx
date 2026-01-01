@@ -41,3 +41,13 @@ icon = "icons/generic.png"
 #use_auth = true
 # For remote HTTPS targets, skip TLS verification (default: false)
 #skip_remote_tls_verify = false
+# allowed hosts/networks (ip addresses only), allowed all by default
+#allow = ["127.0.0.1/32"]
+# allow per-application tokens (default: true)
+#allow_tokens = true
+# allowed user groups (by name), allow all if the list is empty or not present
+#allow_groups = ["group1", "group2"]
+
+#[websocket]
+# Send only required headers, do not send the token in cookies
+#strict = true
