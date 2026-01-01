@@ -5,6 +5,7 @@ use std::{env, path::PathBuf};
 use clap::Parser;
 use fs_err::{read_dir, read_to_string};
 use gateryx::app_util::{self, AppConfigEntry};
+use gateryx::setup::generate_default_config;
 use rustls::crypto::CryptoProvider;
 use tracing::{error, info, warn};
 
@@ -20,6 +21,8 @@ struct Args {
     config: PathBuf,
     #[clap(long, help = "Check configuration and exit")]
     check: bool,
+    #[clap(long, help = "Auto-generate configuration files/dirs if missing")]
+    auto_generate_missing: bool,
     #[clap(long, help = "Print version and exit")]
     version: bool,
 }
@@ -46,6 +49,10 @@ fn main() -> Result<()> {
     }
     gateryx::panic_handler::set();
     configure_logger();
+    if !args.config.exists() && args.auto_generate_missing {
+        warn!(path = %args.config.display(), "Config file does not exist, the default will be created");
+        generate_default_config(&args.config)?;
+    }
     let mut config: Config = {
         let config_str = Zeroizing::new(read_to_string(&args.config)?);
         toml::from_str(&config_str)?

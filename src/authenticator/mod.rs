@@ -68,7 +68,7 @@ impl Config {
         issues.extend(self.authenticator.check(config_dir));
         issues.extend(self.tokens.check(config_dir));
         if !self.www_root.exists() {
-            issues.push(ConfigCheckIssue::Error(format!(
+            issues.push(ConfigCheckIssue::Warning(format!(
                 "Auth www root path does not exist: {}",
                 self.www_root.display()
             )));
