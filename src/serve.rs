@@ -29,6 +29,17 @@ const URI_AUTH_CAPTCHA: &str = "/.gateryx/auth/captcha";
 //const CONNECTION_CLOSE: HeaderValue = HeaderValue::from_static("close");
 const CONNECTION_KEEP_ALIVE: HeaderValue = HeaderValue::from_static("keep-alive");
 
+const ALLOWED_STRICT_WS_HEADERS: &[&str] = &[
+    "sec-websocket-key",
+    "sec-websocket-version",
+    "sec-websocket-protocol",
+    "host",
+    "connection",
+    "upgrade",
+    "cookie",
+    "origin",
+];
+
 type UpstreamClient =
     Arc<Client<HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Incoming>>;
 
@@ -593,17 +604,7 @@ async fn handle_http_request(
             downgrade_to_http11(&mut request, false);
             let (mut parts, body) = request.into_parts();
             let mut headers = http::HeaderMap::new();
-            const ALLOWED_HEADERS: &[&str] = &[
-                "sec-websocket-key",
-                "sec-websocket-version",
-                "sec-websocket-protocol",
-                "host",
-                "connection",
-                "upgrade",
-                "cookie",
-                "origin",
-            ];
-            for h in ALLOWED_HEADERS {
+            for h in ALLOWED_STRICT_WS_HEADERS {
                 if let Some(v) = parts.headers.remove(*h) {
                     headers.insert(*h, v);
                 }
