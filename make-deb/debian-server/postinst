@@ -25,12 +25,6 @@ chmod 700 /var/gateryx/log
 mkdir -p /var/gateryx/db
 chmod 700 /var/gateryx/db
 
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-  -nodes -keyout /etc/gateryx/selfsigned.pem -out /etc/gateryx/selfsigned.crt \
-  -days 3650 \
-  -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-
 (
 cat << EOF
 /var/gateryx/log/access.log {

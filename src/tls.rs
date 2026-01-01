@@ -1,10 +1,11 @@
-use crate::{Result, error::ConfigCheckIssue};
+use crate::{Result, error::ConfigCheckIssue, setup::generate_test_x509_pair};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use serde::Deserialize;
+use tracing::warn;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 type TlsResult<T> = std::result::Result<T, rustls::Error>;
@@ -50,6 +51,13 @@ pub struct Config {
 
 impl Config {
     pub fn load_files(&mut self) -> Result<()> {
+        if !self.cert.exists() && !self.key.exists() {
+            warn!(
+                cert = %self.cert.display(),
+                key = %self.key.display(),
+                "Cert/key files do not exists, generating self-signed certificate");
+            generate_test_x509_pair(&self.cert, &self.key)?;
+        }
         *self.cert_buf.lock() = Zeroizing::new(fs_err::read(&self.cert)?);
         *self.key_buf.lock() = Zeroizing::new(fs_err::read(&self.key)?);
         Ok(())
@@ -69,17 +77,25 @@ impl Config {
         } else {
             config_dir.join(&self.cert)
         };
+        let key_path = if self.key.is_absolute() {
+            self.key.clone()
+        } else {
+            config_dir.join(&self.key)
+        };
+        if !cert_path.exists() && !key_path.exists() {
+            issues.push(ConfigCheckIssue::Warning(format!(
+                "TLS certificate and key paths do not exist: {}, {}, a new self-signed will be generated",
+                cert_path.display(),
+                key_path.display()
+            )));
+            return issues;
+        }
         if !cert_path.exists() {
             issues.push(ConfigCheckIssue::Error(format!(
                 "TLS certificate path does not exist: {}",
                 cert_path.display()
             )));
         }
-        let key_path = if self.key.is_absolute() {
-            self.key.clone()
-        } else {
-            config_dir.join(&self.key)
-        };
         if !key_path.exists() {
             issues.push(ConfigCheckIssue::Error(format!(
                 "TLS key path does not exist: {}",

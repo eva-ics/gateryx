@@ -6,7 +6,7 @@ use std::{
 use crate::{
     ConfigCheckIssue, Error, Result,
     gate::worker::Context,
-    keys::generate_signing_key,
+    setup::generate_signing_key,
     storage::Storage,
     util::{GDuration, get_cookie},
 };
@@ -236,7 +236,9 @@ impl Factory {
     pub async fn init(config: &Config, system_host: Option<&str>) -> Result<Self> {
         info!(path = %config.key_file.display(), "Loading token key");
         if !config.key_file.exists() {
-            warn!("File does not exist. Generating new token key");
+            warn!(
+                key_file = %config.key_file.display(),
+                "File does not exist. Generating new token key");
             generate_signing_key(Some(&config.key_file)).await?;
         }
         let jwt_key_pem = Zeroizing::new(

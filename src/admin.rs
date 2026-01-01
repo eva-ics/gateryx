@@ -20,7 +20,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::{
     ConfigCheckIssue, Error, Result,
     authenticator::RandomSleeper,
-    keys::generate_signing_key,
+    setup::generate_signing_key,
     util::{AllowRemoteStrict, GDuration, synth_sleep},
 };
 
@@ -134,7 +134,9 @@ impl Auth {
     pub async fn init(config: &Config) -> Result<Self> {
         info!(path = %config.key_file.display(), "Loading admin key");
         if !config.key_file.exists() {
-            warn!("File does not exist. Generating new admin key");
+            warn!(
+                key_file = %config.key_file.display(),
+                "File does not exist. Generating new admin key");
             generate_signing_key(Some(&config.key_file)).await?;
         }
         let admin_key_pem = Zeroizing::new(
