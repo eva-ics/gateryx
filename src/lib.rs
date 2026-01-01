@@ -23,6 +23,7 @@ mod compress;
 mod error;
 mod gate;
 mod headers;
+pub mod keys;
 mod logger;
 mod ml;
 pub mod panic_handler;

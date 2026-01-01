@@ -330,7 +330,7 @@ impl RandomSleeper {
     }
     pub async fn sleep(&self) {
         let mut sleep_duration =
-            Duration::from_millis(rand::rng().random_range(self.ms_range.clone()));
+            Duration::from_millis(rand::thread_rng().gen_range(self.ms_range.clone()));
         let elapsed = self.start.elapsed();
         if elapsed > sleep_duration {
             return;

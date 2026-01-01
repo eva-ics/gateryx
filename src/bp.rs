@@ -239,10 +239,10 @@ impl BreakinProtection {
         // random 6 alpha chars
         let supported = Captcha::new().supported_chars();
         // select 6 random chars
-        let mut rng = rand::rng();
+        let mut rng = rand::thread_rng();
         let s: String = (0..4)
             .map(|_| {
-                let idx = rng.random_range(0..supported.len());
+                let idx = rng.gen_range(0..supported.len());
                 supported[idx]
             })
             .collect();

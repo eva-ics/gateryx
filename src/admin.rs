@@ -14,12 +14,13 @@ use hyper::body::{Body, Bytes, Incoming};
 use p256::{PublicKey as EcPublicKey, ecdsa::SigningKey};
 use pkcs8::DecodePrivateKey as _;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::{
     ConfigCheckIssue, Error, Result,
     authenticator::RandomSleeper,
+    keys::generate_signing_key,
     util::{AllowRemoteStrict, GDuration, synth_sleep},
 };
 
@@ -66,8 +67,8 @@ impl Config {
             config_dir.join(&self.key_file)
         };
         if !key_path.exists() {
-            issues.push(ConfigCheckIssue::Error(format!(
-                "Admin key file path does not exist: {}",
+            issues.push(ConfigCheckIssue::Warning(format!(
+                "Admin key file path does not exist: {}, the new key will be auto-generated",
                 key_path.display()
             )));
         }
@@ -132,6 +133,10 @@ pub struct Auth {
 impl Auth {
     pub async fn init(config: &Config) -> Result<Self> {
         info!(path = %config.key_file.display(), "Loading admin key");
+        if !config.key_file.exists() {
+            warn!("File does not exist. Generating new admin key");
+            generate_signing_key(Some(&config.key_file)).await?;
+        }
         let admin_key_pem = Zeroizing::new(
             tokio::fs::read_to_string(&config.key_file)
                 .await

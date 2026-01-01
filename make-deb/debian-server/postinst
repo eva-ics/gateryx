@@ -25,11 +25,6 @@ chmod 700 /var/gateryx/log
 mkdir -p /var/gateryx/db
 chmod 700 /var/gateryx/db
 
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out /etc/gateryx/tokens.pem
-chmod 600 /etc/gateryx/tokens.pem
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out /etc/gateryx/admin.pem
-chmod 600 /etc/gateryx/admin.pem
-
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
   -nodes -keyout /etc/gateryx/selfsigned.pem -out /etc/gateryx/selfsigned.crt \
   -days 3650 \
