@@ -30,7 +30,7 @@ fn default_token_cookie_name() -> String {
 const JWKS_PATH: &str = "/.well-known/jwks.json";
 
 fn max_bearer_expire() -> GDuration {
-    GDuration::from_secs(86400 * 365) // 7 days
+    GDuration::from_secs(86400 * 365) // 365 days
 }
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]

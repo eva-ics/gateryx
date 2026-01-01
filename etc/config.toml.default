@@ -60,12 +60,17 @@ passkeys = { max_auth_challenges = "1k", max_reg_challenges = 10, timeout = 60 }
 
 # key_file: PKCS#8 private key in PEM format, eg. openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out tokens.pem. Auto-generated if not present
 # expire: token expiration time since the token was issued
+# max_bearer_expire: maximum allowed expiration time for per-app tokens
 # domain: token validation for subdomains of the specified domain, also used as rp_id for passkeys
 # cookie: name of the cookie to store the token (gateryx_auth_<cookie>), default is "token"
 tokens = { key_file = "tokens.pem", expire = "7d", domain = "domain.local", cookie = "token" }
 
 # authentication form web
 www_root = "/var/gateryx/www/auth"
+
+# The following user agents will always get 401 Unauthorized response with
+# Basic authentication challenge, unless text/html is requested
+#reply_401_to_user_agents = ["git/*", "curl/*", "Wget/*"]
 
 [[listener]]
 bind = "0.0.0.0:80"

@@ -10,4 +10,4 @@ COPY ./_build/gateryx-server-${TARGETARCH}.deb /tmp/
 RUN apt-get update && apt-get install -y libssl3 ca-certificates \
   /tmp/gateryx-client-${TARGETARCH}.deb /tmp/gateryx-server-${TARGETARCH}.deb && \
     rm -f /tmp/*.deb
-ENTRYPOINT ["/usr/sbin/gateryx-server"]
+ENTRYPOINT ["/usr/sbin/gateryx-server", "--auto-generate-missing"]
