@@ -32,7 +32,7 @@ compress = true
 #
 #client = "http1"
 # Path to application icon (relative to the primary configuration file)
-icon = "icons/generic.png"
+#icon = "icons/generic.png"
 # Target timeout (default: 10 seconds)
 #timeout = 10
 # Application visibility in the list (default: false)
