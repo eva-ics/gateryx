@@ -81,10 +81,19 @@ fn default_min_length() -> usize {
     8
 }
 
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, strum::Display)]
+#[strum(serialize_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum UserKind {
+    Reg,
+    Svc,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UserInfo {
     pub login: String,
     pub active: u8,
+    pub kind: UserKind,
     pub created: Timestamp,
     pub last_login: Timestamp,
     pub groups: Vec<String>,

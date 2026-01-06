@@ -89,6 +89,8 @@ struct RemoveUserFromGroupCommand {
 struct CreateUserCommand {
     #[clap()]
     user: String,
+    #[clap(short = 'r')]
+    service: bool,
 }
 
 #[derive(Parser)]
@@ -375,11 +377,19 @@ async fn main() -> Result<()> {
                 let users: Vec<UserInfo> = client.call("admin.user.list", ()).await?;
                 to_json!(users);
                 let mut table = create_table();
-                table.set_titles(row!["User", "Act", "Groups", "Created", "Last Login"]);
+                table.set_titles(row![
+                    "User",
+                    "Act",
+                    "Kind",
+                    "Groups",
+                    "Created",
+                    "Last Login"
+                ]);
                 for user in users {
                     table.add_row(row![
                         user.login,
                         if user.active == 0 { "" } else { "Y" },
+                        user.kind,
                         user.groups.join(","),
                         user.created
                             .try_into_datetime_local()
@@ -393,9 +403,12 @@ async fn main() -> Result<()> {
                 }
                 table.printstd();
             }
-            UserCommand::Create(CreateUserCommand { user }) => {
-                let password =
-                    rpassword::prompt_password(format!("Password for user '{}': ", user))?;
+            UserCommand::Create(CreateUserCommand { user, service }) => {
+                let password = if service {
+                    String::new()
+                } else {
+                    rpassword::prompt_password(format!("Password for user '{}': ", user))?
+                };
                 let params = serde_json::json!({ "user": user,
                     "password": password
                 });

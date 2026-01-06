@@ -40,6 +40,9 @@ impl DbAuth {
     async fn verify_password(&self, login: &str, password: &str) -> AuthResult {
         match self.storage.lookup_user(login).await {
             Ok(Some(password_hash)) => {
+                if password_hash.is_empty() {
+                    return AuthResult::Failure;
+                }
                 let parsed_hash = match PasswordHash::new(&password_hash) {
                     Ok(h) => h,
                     Err(e) => {
@@ -103,7 +106,11 @@ impl Authenticator for DbAuth {
         self.storage.user_groups(login).await
     }
     async fn add(&self, login: &str, password: &str) -> Result<()> {
-        let password_hash = self.hash_password(password)?;
+        let password_hash = if password.is_empty() {
+            String::new()
+        } else {
+            self.hash_password(password)?
+        };
         self.storage.create_user(login, &password_hash).await
     }
     async fn delete(&self, login: &str) -> Result<()> {

@@ -12,7 +12,7 @@ use webauthn_rs::prelude::Passkey;
 
 use crate::{
     Error, Result,
-    authenticator::{GroupInfo, UserInfo},
+    authenticator::{GroupInfo, UserInfo, UserKind},
 };
 
 pub struct Storage {
@@ -390,7 +390,7 @@ impl super::Storage for Storage {
     async fn list_users(&self) -> Result<Vec<UserInfo>> {
         let rows = sqlx::query(
             "
-            SELECT login, active, created, last_login
+            SELECT login, password_hash, active, created, last_login
             FROM users
             ORDER BY login ASC
             ",
@@ -401,10 +401,16 @@ impl super::Storage for Storage {
         let mut users = Vec::new();
         for row in rows {
             let login: String = row.try_get("login")?;
+            let password_hash: Option<String> = row.try_get("password_hash")?;
             let groups = self.user_groups(&login).await?;
             users.push(UserInfo {
                 login,
                 active: row.try_get::<bool, _>("active")?.into(),
+                kind: if password_hash.is_some_and(|p| !p.is_empty()) {
+                    UserKind::Reg
+                } else {
+                    UserKind::Svc
+                },
                 created: row.try_get("created")?,
                 last_login: row.try_get("last_login")?,
                 groups,
