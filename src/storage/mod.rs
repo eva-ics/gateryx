@@ -43,7 +43,7 @@ pub trait Storage: Send + Sync {
         })
     }
 
-    async fn invalidate(&self, sub: &str, record_expires: Duration) -> Result<()>;
+    async fn invalidate(&self, sub: &str) -> Result<()>;
 
     async fn is_token_revoked(&self, sub: &str, t_issued: Timestamp) -> Result<bool>;
 

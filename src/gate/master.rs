@@ -268,17 +268,12 @@ impl MasterHandlers {
                 #[derive(Deserialize)]
                 struct Params {
                     user: String,
-                    expires: Option<u64>,
                 }
                 let p: Params = serde_json::from_value(params)?;
-                let Some(ref factory) = self.context.token_factory else {
+                if self.context.token_factory.is_none() {
                     auth_not_configured!();
-                };
-                let expires = p.expires.unwrap_or(factory.max_expiration_seconds());
-                self.context
-                    .storage
-                    .invalidate(&p.user, Duration::from_secs(expires))
-                    .await?;
+                }
+                self.context.storage.invalidate(&p.user).await?;
                 Ok(Value::Null)
             }
             "admin.user.create" => {
@@ -309,14 +304,8 @@ impl MasterHandlers {
                 {
                     return Err(e);
                 }
-                if let Some(ref factory) = self.context.token_factory {
-                    self.context
-                        .storage
-                        .invalidate(
-                            &p.user,
-                            Duration::from_secs(factory.max_expiration_seconds()),
-                        )
-                        .await?;
+                if self.context.token_factory.is_some() {
+                    self.context.storage.invalidate(&p.user).await?;
                 }
                 self.context.storage.delete_passkey(&p.user).await?;
                 Ok(Value::Null)
@@ -339,14 +328,8 @@ impl MasterHandlers {
                     auth_not_configured!();
                 };
                 auth.set_password_forced(&p.user, &p.password).await?;
-                if let Some(ref factory) = self.context.token_factory {
-                    self.context
-                        .storage
-                        .invalidate(
-                            &p.user,
-                            Duration::from_secs(factory.max_expiration_seconds()),
-                        )
-                        .await?;
+                if self.context.token_factory.is_some() {
+                    self.context.storage.invalidate(&p.user).await?;
                 }
                 Ok(Value::Null)
             }
@@ -574,14 +557,8 @@ impl RpcHandlers for MasterHandlers {
                 if let Some(ref auth) = self.context.authenticator {
                     auth.set_password(&user, &p.old_password, &p.new_password)
                         .await?;
-                    if let Some(ref factory) = self.context.token_factory {
-                        self.context
-                            .storage
-                            .invalidate(
-                                &user,
-                                Duration::from_secs(factory.max_expiration_seconds()),
-                            )
-                            .await?;
+                    if self.context.token_factory.is_some() {
+                        self.context.storage.invalidate(&user).await?;
                     }
                     Ok(Some(pack(true)?))
                 } else {
@@ -599,13 +576,7 @@ impl RpcHandlers for MasterHandlers {
                 else {
                     return Err(Error::access("Invalid token").into());
                 };
-                self.context
-                    .storage
-                    .invalidate(
-                        &claims.sub,
-                        Duration::from_secs(token_factory.max_expiration_seconds()),
-                    )
-                    .await?;
+                self.context.storage.invalidate(&claims.sub).await?;
                 Ok(Some(pack(true)?))
             }
             "!" => {

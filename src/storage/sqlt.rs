@@ -102,12 +102,14 @@ impl super::Storage for Storage {
             CREATE TABLE IF NOT EXISTS revoked_tokens (
                 user VARCHAR PRIMARY KEY,
                 not_before BIGINT,
-                keep_until BIGINT
+                keep_until BIGINT,
+                FOREIGN KEY (user) REFERENCES users(user) ON DELETE CASCADE
             );
             ",
         )
         .execute(&self.pool)
         .await?;
+        // no foreign key for passkeys as they can exist without a user
         sqlx::query(
             r"
             CREATE TABLE IF NOT EXISTS passkeys (
@@ -194,18 +196,16 @@ impl super::Storage for Storage {
         Ok(groups)
     }
 
-    async fn invalidate(&self, user: &str, record_expires: Duration) -> Result<()> {
+    async fn invalidate(&self, user: &str) -> Result<()> {
         let now = Timestamp::now();
-        let keep_until = now + record_expires;
         sqlx::query(
             r"
-            INSERT OR REPLACE INTO revoked_tokens (user, not_before, keep_until)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO revoked_tokens (user, not_before)
+            VALUES (?, ?)
             ",
         )
         .bind(user)
         .bind(now)
-        .bind(keep_until)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -219,16 +219,6 @@ impl super::Storage for Storage {
     }
 
     async fn cleanup(&self) -> Result<()> {
-        let now = Timestamp::now();
-        sqlx::query(
-            r"
-            DELETE FROM revoked_tokens
-            WHERE keep_until < ?
-            ",
-        )
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
         Ok(())
     }
 

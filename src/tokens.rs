@@ -288,6 +288,7 @@ impl Factory {
             openid_configuration,
         })
     }
+    #[allow(dead_code)]
     pub fn max_expiration_seconds(&self) -> u64 {
         max(self.expiration_seconds, self.max_bearer_expire_seconds)
     }

@@ -107,11 +107,6 @@ struct SetPasswordCommand {
 struct InvalidateCommand {
     #[clap()]
     user: String,
-    #[clap(
-        long,
-        help = "Override revocation record expiration time (default: configured value)"
-    )]
-    expires: Option<GDuration>,
 }
 
 pub struct RpcClient {
@@ -421,10 +416,9 @@ async fn main() -> Result<()> {
                 let _: () = client.call("admin.user.set_password", params).await?;
                 ok!();
             }
-            UserCommand::Invalidate(InvalidateCommand { user, expires }) => {
+            UserCommand::Invalidate(InvalidateCommand { user }) => {
                 let params = serde_json::json!({
                     "user": user,
-                    "expires": expires.map(|v| v.as_secs()),
                 });
                 let _: () = client.call("admin.invalidate", params).await?;
                 ok!();

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bma_ts::Timestamp;
 use tracing::warn;
 use webauthn_rs::prelude::Passkey;
@@ -14,7 +12,7 @@ pub struct Storage {}
 
 #[async_trait::async_trait]
 impl super::Storage for Storage {
-    async fn invalidate(&self, _sub: &str, _record_expires: Duration) -> Result<()> {
+    async fn invalidate(&self, _sub: &str) -> Result<()> {
         warn!("Token revocation is not supported with Dummy storage");
         Ok(())
     }

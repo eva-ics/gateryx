@@ -105,12 +105,15 @@ impl super::Storage for Storage {
             CREATE TABLE IF NOT EXISTS revoked_tokens (
                 login TEXT PRIMARY KEY,
                 not_before TIMESTAMPTZ NOT NULL,
-                keep_until TIMESTAMPTZ NOT NULL
+                keep_until TIMESTAMPTZ NOT NULL,
+                FOREIGN KEY (login) REFERENCES users(login) ON DELETE CASCADE
             )
             ",
         )
         .execute(&self.pool)
         .await?;
+
+        // no foreign key for passkeys as they can exist without a user
 
         sqlx::query(
             "
@@ -119,7 +122,7 @@ impl super::Storage for Storage {
                 cred_id BYTEA UNIQUE NOT NULL,
                 data TEXT NOT NULL,
                 created TIMESTAMPTZ NOT NULL,
-                last_used TIMESTAMPTZ NOT NULL
+                last_used TIMESTAMPTZ NOT NULL,
             )
             ",
         )
@@ -186,22 +189,19 @@ impl super::Storage for Storage {
         Ok(groups)
     }
 
-    async fn invalidate(&self, login: &str, record_expires: Duration) -> Result<()> {
+    async fn invalidate(&self, login: &str) -> Result<()> {
         let now = Timestamp::now();
-        let keep_until = now + record_expires;
 
         sqlx::query(
             "
-            INSERT INTO revoked_tokens (login, not_before, keep_until)
+            INSERT INTO revoked_tokens (login, not_before)
             VALUES ($1, $2, $3)
             ON CONFLICT (login) DO UPDATE
-            SET not_before = EXCLUDED.not_before,
-                keep_until = EXCLUDED.keep_until
+            SET not_before = EXCLUDED.not_before
             ",
         )
         .bind(login)
         .bind(now)
-        .bind(keep_until)
         .execute(&self.pool)
         .await?;
 
@@ -216,16 +216,6 @@ impl super::Storage for Storage {
     }
 
     async fn cleanup(&self) -> Result<()> {
-        let now = Timestamp::now();
-        sqlx::query(
-            "
-            DELETE FROM revoked_tokens
-            WHERE keep_until < $1
-            ",
-        )
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
         Ok(())
     }
 
