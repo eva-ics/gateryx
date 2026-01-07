@@ -586,7 +586,7 @@ async fn handle_http_request(
         .get("upgrade")
         .is_some_and(|v| v == "websocket");
     if app.client.insert_gateryx_headers()
-        && (!is_websocket || app.websocket.as_ref().is_some_and(|w| !w.strict))
+        && (!is_websocket || app.websocket.as_ref().is_none_or(|w| !w.strict))
     {
         request.headers_mut().insert(
             &context.headers.real_ip,
