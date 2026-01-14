@@ -138,7 +138,7 @@ impl MasterHandlers {
             vec![]
         };
         self.context.report_auth_success(remote_ip, &user);
-        let (token_str, exp) = token_factory.issue(&user, groups, vec![], None)?;
+        let (token_str, exp) = token_factory.issue(&user, groups, vec![], None, false)?;
         Ok(AuthResponse::Success((token_str, user, exp)))
     }
     async fn authenticate(&self, p: AuthPayload, remote_ip: IpAddr) -> Result<AuthResponse> {
@@ -173,7 +173,7 @@ impl MasterHandlers {
                     maybe_need_captcha!(true);
                 }
                 self.context.report_auth_success(remote_ip, &p.user);
-                let (token_str, exp) = factory.issue(&p.user, groups, vec![], None)?;
+                let (token_str, exp) = factory.issue(&p.user, groups, vec![], None, false)?;
                 Ok(AuthResponse::Success((token_str, p.user.clone(), exp)))
             }
             crate::authenticator::AuthResult::Failure => {
@@ -267,6 +267,24 @@ impl MasterHandlers {
         match method {
             "admin.test" => Ok(serde_json::json!({"ok": true})),
             "admin.app.list" => Ok(to_value(&self.context.apps)?),
+            "admin.user.issue_app_token" => {
+                #[derive(Deserialize)]
+                struct Params {
+                    user: String,
+                    apps: Vec<String>,
+                    exp: Option<u64>,
+                }
+                let p: Params = serde_json::from_value(params)?;
+                let Some(ref token_factory) = self.context.token_factory else {
+                    auth_not_configured!();
+                };
+                let (token_str, token_exp) =
+                    token_factory.issue(&p.user, vec![], p.apps, p.exp, true)?;
+                Ok(to_value(serde_json::json!({
+                    "token": token_str,
+                    "exp": token_exp,
+                }))?)
+            }
             "admin.invalidate" => {
                 #[derive(Deserialize)]
                 struct Params {
@@ -479,7 +497,7 @@ impl RpcHandlers for MasterHandlers {
                 }
                 let sleeper = RandomSleeper::new(100..300);
                 let (token, _token_exp) =
-                    token_factory.issue(&claims.sub, vec![], apps, Some(exp))?;
+                    token_factory.issue(&claims.sub, vec![], apps, Some(exp), false)?;
                 sleeper.sleep().await;
                 Ok(Some(pack(token)?))
             }

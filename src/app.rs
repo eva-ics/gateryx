@@ -208,6 +208,7 @@ pub struct AdminAppView {
     pub has_icon: bool,
     pub allow_tokens: bool,
     pub url: String,
+    pub hosts: Vec<String>,
     pub allow_groups: Vec<String>,
     pub hidden: bool,
 }
@@ -251,6 +252,7 @@ impl AppHostMapInner {
                 has_icon: config.icon.is_some(),
                 allow_tokens: config.allow_tokens,
                 url: config.url.clone(),
+                hosts: config.hosts.clone(),
                 allow_groups: config.allow_groups.clone(),
                 hidden: config.hidden,
             })

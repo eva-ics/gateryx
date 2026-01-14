@@ -297,9 +297,11 @@ impl Factory {
         sub: S,
         groups: Vec<String>,
         apps: Vec<String>,
+        // in seconds!
         exp: Option<u64>,
+        admin: bool,
     ) -> Result<(String, u64)> {
-        if !apps.is_empty() {
+        if !admin && !apps.is_empty() {
             let Some(exp) = exp else {
                 return Err(Error::failed("App tokens must have explicit expiration"));
             };

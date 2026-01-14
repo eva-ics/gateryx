@@ -1,3 +1,4 @@
+use bma_ts::Timestamp;
 use clap::Parser;
 use colored::Colorize;
 use fs_err::read_to_string;
@@ -54,6 +55,7 @@ enum UserCommand {
     Delete(DeleteUserCommand),
     Password(SetPasswordCommand),
     Invalidate(InvalidateCommand),
+    IssueAppToken(IssueAppTokenCommand),
 }
 
 #[derive(Parser)]
@@ -117,6 +119,20 @@ struct SetPasswordCommand {
 struct InvalidateCommand {
     #[clap()]
     user: String,
+}
+
+#[derive(Parser)]
+struct IssueAppTokenCommand {
+    #[clap(short = 'u', long)]
+    user: String,
+    #[clap(short = 'a', long = "app", help = "List of application HOST NAMES")]
+    apps: Vec<String>,
+    #[clap(
+        short = 'x',
+        long,
+        help = "Expiration time in days (can exceed the limits)"
+    )]
+    exp: Option<u64>,
 }
 
 pub struct RpcClient {
@@ -349,12 +365,13 @@ async fn main() -> Result<()> {
                 let apps: Vec<AdminAppView> = client.call("admin.app.list", ()).await?;
                 to_json!(apps);
                 let mut table = create_table();
-                table.set_titles(row!["Name", "Tok", "Url", "Groups", "Hidden"]);
+                table.set_titles(row!["Name", "Tok", "Url", "Hosts", "Groups", "Hidden"]);
                 for app in apps {
                     table.add_row(row![
                         app.name,
                         if app.allow_tokens { "Y" } else { "" },
                         app.url,
+                        app.hosts.join(","),
                         app.allow_groups.join(","),
                         if app.hidden { "Y" } else { "" },
                     ]);
@@ -461,6 +478,36 @@ async fn main() -> Result<()> {
                 });
                 let _: () = client.call("admin.invalidate", params).await?;
                 ok!();
+            }
+            UserCommand::IssueAppToken(IssueAppTokenCommand { user, apps, exp }) => {
+                #[derive(Deserialize, Serialize)]
+                struct TokenInfo {
+                    token: String,
+                    exp: u64,
+                }
+                if apps.is_empty() {
+                    return Err(Error::failed("At least one app must be specified"));
+                }
+                let params = serde_json::json!({
+                    "user": user,
+                    "apps": apps,
+                    "exp": exp.map(|d| d * 86400),
+                });
+                let ti: TokenInfo = client.call("admin.user.issue_app_token", params).await?;
+                if args.json {
+                    let json = serde_json::to_string_pretty(&ti)?;
+                    println!("{}", json);
+                } else {
+                    let exp_str = Timestamp::from_secs(ti.exp)
+                        .try_into_datetime_local()
+                        .map_err(|e| Error::failed(format!("Invalid expiration time: {}", e)))?
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                    println!("Token");
+                    println!("-------------------------------");
+                    println!("{}", ti.token);
+                    println!("-------------------------------");
+                    println!("Expires: {}", exp_str);
+                }
             }
         },
     }
