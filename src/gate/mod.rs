@@ -160,6 +160,7 @@ pub fn run(
             config,
             virtual_app_map,
             primary_system_host,
+            app_map.apps_admin_view(),
         );
     }
     let master_client_fd = worker_sock.as_raw_fd();

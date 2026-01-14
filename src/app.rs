@@ -143,6 +143,10 @@ impl AppHostMap {
         let inner = self.inner.lock().await;
         inner.apps()
     }
+    pub fn apps_admin_view(&self) -> Vec<AdminAppView> {
+        let inner = self.inner.blocking_lock();
+        inner.apps_admin_view()
+    }
     pub fn set_default_app(&self, name: Option<&str>) {
         let mut inner = self.inner.blocking_lock();
         inner.set_default_app(name);
@@ -185,15 +189,27 @@ struct AppHostMapInner {
     default: Option<(String, Arc<Config>)>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct AppView {
-    name: String,
-    display_name: String,
-    has_icon: bool,
-    allow_tokens: bool,
-    url: String,
+    pub name: String,
+    pub display_name: String,
+    pub has_icon: bool,
+    pub allow_tokens: bool,
+    pub url: String,
     #[serde(skip)]
     pub allow_groups: Vec<String>,
+    pub hidden: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AdminAppView {
+    pub name: String,
+    pub display_name: String,
+    pub has_icon: bool,
+    pub allow_tokens: bool,
+    pub url: String,
+    pub allow_groups: Vec<String>,
+    pub hidden: bool,
 }
 
 impl AppHostMapInner {
@@ -217,8 +233,26 @@ impl AppHostMapInner {
                         allow_tokens: config.allow_tokens,
                         url: config.url.clone(),
                         allow_groups: config.allow_groups.clone(),
+                        hidden: config.hidden,
                     })
                 }
+            })
+            .collect();
+        res.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+        res
+    }
+    fn apps_admin_view(&self) -> Vec<AdminAppView> {
+        let mut res: Vec<AdminAppView> = self
+            .apps
+            .iter()
+            .map(|(n, config)| AdminAppView {
+                name: n.clone(),
+                display_name: config.name.clone(),
+                has_icon: config.icon.is_some(),
+                allow_tokens: config.allow_tokens,
+                url: config.url.clone(),
+                allow_groups: config.allow_groups.clone(),
+                hidden: config.hidden,
             })
             .collect();
         res.sort_by(|a, b| a.display_name.cmp(&b.display_name));

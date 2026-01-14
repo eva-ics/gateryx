@@ -4,6 +4,7 @@ use fs_err::read_to_string;
 use gateryx::{
     Config, Error, Result,
     admin::{self, Config as AdminConfig},
+    app::AdminAppView,
     authenticator::{GroupInfo, UserInfo},
     rpc::{RpcRequest, RpcResponse, URI_RPC, URI_RPC_ADMIN},
     util::GDuration,
@@ -33,10 +34,17 @@ struct Args {
 enum Command {
     Test,
     #[clap(subcommand)]
+    App(AppCommand),
+    #[clap(subcommand)]
     Group(GroupCommand),
     #[clap(subcommand)]
     User(UserCommand),
     Version,
+}
+
+#[derive(Parser)]
+enum AppCommand {
+    List,
 }
 
 #[derive(Parser)]
@@ -336,6 +344,24 @@ async fn main() -> Result<()> {
             let _: Empty = client.call("admin.test", serde_json::json!({})).await?;
             ok!();
         }
+        Command::App(app_cmd) => match app_cmd {
+            AppCommand::List => {
+                let apps: Vec<AdminAppView> = client.call("admin.app.list", ()).await?;
+                to_json!(apps);
+                let mut table = create_table();
+                table.set_titles(row!["Name", "Tok", "Url", "Groups", "Hidden"]);
+                for app in apps {
+                    table.add_row(row![
+                        app.name,
+                        if app.allow_tokens { "Y" } else { "" },
+                        app.url,
+                        app.allow_groups.join(","),
+                        if app.hidden { "Y" } else { "" },
+                    ]);
+                }
+                table.printstd();
+            }
+        },
         Command::Group(group_cmd) => match group_cmd {
             GroupCommand::List => {
                 let groups: Vec<GroupInfo> = client.call("admin.group.list", ()).await?;

@@ -11,6 +11,7 @@ use std::{
 use crate::{
     Result,
     admin::TransferredRequest,
+    app::AdminAppView,
     authenticator::RandomSleeper,
     passkeys::{Base64UrlSafeData, PublicKeyCredential, RegisterPublicKeyCredential},
     rpc::{RpcRequest as JsonRpcRequest, RpcResponse as JsonRpcResponse},
@@ -45,6 +46,7 @@ const CLEANUP_WORKER_INTERVAL: Duration = Duration::from_secs(60);
 
 struct Context {
     admin_auth: Option<admin::Auth>,
+    apps: Vec<AdminAppView>,
     authenticator: Option<Box<dyn authenticator::Authenticator>>,
     bp: Option<Arc<bp::BreakinProtection>>,
     passkey_factory: Option<passkeys::Factory>,
@@ -264,6 +266,7 @@ impl MasterHandlers {
         }
         match method {
             "admin.test" => Ok(serde_json::json!({"ok": true})),
+            "admin.app.list" => Ok(to_value(&self.context.apps)?),
             "admin.invalidate" => {
                 #[derive(Deserialize)]
                 struct Params {
@@ -628,6 +631,7 @@ async fn run_master_api_impl(
     config: Zeroizing<Config>,
     virtual_app_map: Arc<VAppMap>,
     primary_system_host: Option<String>,
+    apps: Vec<AdminAppView>,
 ) -> Result<()> {
     let active = Arc::new(AtomicBool::new(true));
     register_signals(active.clone());
@@ -638,6 +642,7 @@ async fn run_master_api_impl(
         .spawn_cleanup_worker(CLEANUP_WORKER_INTERVAL);
     let mut context = Context {
         admin_auth: None,
+        apps,
         authenticator: None,
         bp: None,
         passkey_factory: None,
@@ -728,6 +733,7 @@ pub fn serve(
     config: Zeroizing<Config>,
     virtual_app_map: Arc<VAppMap>,
     primary_system_host: Option<String>,
+    apps: Vec<AdminAppView>,
 ) -> Result<()> {
     crate::panic_handler::register_pid(child_pid);
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -739,6 +745,7 @@ pub fn serve(
         config,
         virtual_app_map,
         primary_system_host,
+        apps,
     ))?;
     Ok(())
 }
