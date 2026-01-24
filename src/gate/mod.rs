@@ -169,10 +169,17 @@ pub fn run(
             tls_config.load_files()?;
         }
     }
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(config.server.worker_threads.into())
-        .enable_all()
-        .build()?;
+    let worker_threads = usize::from(config.server.worker_threads);
+    let rt = if worker_threads > 1 {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker_threads)
+            .enable_all()
+            .build()?
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+    };
     rt.block_on(async move {
         let (context_data, listeners) =
             worker::prepare_privileged(&config, app_map, virtual_app_map, primary_system_host)
