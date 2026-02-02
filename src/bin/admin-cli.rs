@@ -99,7 +99,7 @@ struct RemoveUserFromGroupCommand {
 struct CreateUserCommand {
     #[clap()]
     user: String,
-    #[clap(short = 'r')]
+    #[clap(short = 'r', long)]
     service: bool,
 }
 
