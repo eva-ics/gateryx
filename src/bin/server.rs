@@ -1,5 +1,6 @@
 use std::io::Write as _;
 use std::mem;
+use std::path::Path;
 use std::{env, path::PathBuf};
 
 use clap::Parser;
@@ -7,6 +8,7 @@ use fs_err::{read_dir, read_to_string};
 use gateryx::app_util::{self, AppConfigEntry};
 use gateryx::setup::generate_default_config;
 use rustls::crypto::CryptoProvider;
+use serde::Deserialize as _;
 use tracing::{error, info, warn};
 
 use gateryx::{AppHostMap, Config, Error, Result, VAppMap, app::Config as AppConfig};
@@ -16,6 +18,7 @@ use zeroize::Zeroizing;
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser)]
+#[allow(clippy::struct_excessive_bools)]
 struct Args {
     #[clap(short = 'c', long, default_value = "/etc/gateryx/config.toml")]
     config: PathBuf,
@@ -23,6 +26,8 @@ struct Args {
     check: bool,
     #[clap(long, help = "Auto-generate configuration files/dirs if missing")]
     auto_generate_missing: bool,
+    #[clap(long, help = "Launch as EVA ICS service)")]
+    eva_svc: bool,
     #[clap(long, help = "Print version and exit")]
     version: bool,
 }
@@ -40,27 +45,87 @@ fn configure_logger() {
     builder.init();
 }
 
-#[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     let args = Args::parse();
     if args.version {
         println!("gateryx {}", gateryx::VERSION);
         return Ok(());
     }
-    gateryx::panic_handler::set();
-    configure_logger();
-    if !args.config.exists() && args.auto_generate_missing {
-        warn!(path = %args.config.display(), "Config file does not exist, the default will be created");
-        generate_default_config(&args.config)?;
+    if args.eva_svc {
+        eva_sdk::service::svc_launch(run_eva_service).map_err(Error::failed)
+    } else {
+        gateryx::panic_handler::set();
+        configure_logger();
+        if !args.config.exists() && args.auto_generate_missing {
+            warn!(path = %args.config.display(), "Config file does not exist, the default will be created");
+            generate_default_config(&args.config)?;
+        }
+        let config: Config = {
+            let config_str = Zeroizing::new(read_to_string(&args.config)?);
+            toml::from_str(&config_str)?
+        };
+        let config_path = args.config.canonicalize()?;
+        let config_dir = config_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        run_server(config, config_dir, args.check)
     }
-    let mut config: Config = {
-        let config_str = Zeroizing::new(read_to_string(&args.config)?);
-        toml::from_str(&config_str)?
-    };
-    let config_path = args.config.canonicalize()?;
-    let config_dir = config_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
+}
+
+#[allow(clippy::cast_possible_wrap)]
+async fn run_eva_service(mut initial: eva_common::services::Initial) -> eva_common::EResult<()> {
+    use eva_sdk::prelude::*;
+
+    struct Handlers {
+        info: ServiceInfo,
+    }
+
+    #[async_trait]
+    impl RpcHandlers for Handlers {
+        async fn handle_call(&self, event: RpcEvent) -> RpcResult {
+            let method = event.parse_method()?;
+            svc_handle_default_rpc(method, &self.info)
+        }
+    }
+
+    let config_dir = Path::new(initial.eva_dir()).join("runtime/gateryx");
+    let config: Config = Config::deserialize(
+        initial
+            .take_config()
+            .ok_or_else(|| Error::invalid_data("config not specified"))?,
+    )?;
+    let info = ServiceInfo::new("Bohemia Automation", env!("CARGO_PKG_VERSION"), "HTTP WAF");
+    let handlers = Handlers { info };
+    eapi_bus::init(&initial, handlers).await?;
+    eapi_bus::init_logs(&initial)?;
+    eapi_bus::mark_ready().await?;
+    tracing::info!("Starting Gateryx service ({})", initial.id());
+    let (tx_pid, rx_pid) = oneshot::channel();
+    let h = tokio::task::spawn_blocking(move || {
+        let pid = std::process::id();
+        tx_pid.send(pid).ok();
+        run_server(config, &config_dir, false).map_err(Error::failed)
+    });
+    let pid = rx_pid
+        .await
+        .map_err(|_| Error::failed("Failed to receive PID from server task"))?;
+    tokio::select! {
+        h = h => {
+            h.map_err(Error::failed)??;
+        }
+        () = eapi_bus::block() => {
+            unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        }
+    }
+    eapi_bus::block().await;
+    eapi_bus::mark_terminating().await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_server(mut config: Config, config_dir: &std::path::Path, check: bool) -> Result<()> {
     let mut check_result = config.check(config_dir);
     let app_d_dir = config_dir.join("app.d");
     let mut app_config_entries: Vec<AppConfigEntry> = Vec::new();
@@ -119,7 +184,7 @@ fn main() -> Result<()> {
     if has_error {
         std::process::exit(1);
     }
-    if args.check {
+    if check {
         if has_warning {
             std::process::exit(2);
         }
