@@ -29,7 +29,7 @@ async-trait = "0.1.89"
 atomic-timer = "0.3.0"
 base64 = "0.22.1"
 bcrypt = "0.17.1"
-bma-ts = { version = "0.2.4", features = ["sqlx", "serde", "chrono", "bincode"] }
+bma-ts = { version = "0.2.5", features = ["sqlx", "serde", "chrono"] }
 brotli = "8.0.2"
 busrt = { version = "0.5.0", features = ["broker", "ipc", "rpc"] }
 captcha = { version = "1.0.0", git = "https://github.com/divi255/captcha", default-features = false, optional = true }
