@@ -55,6 +55,8 @@ pub struct AuthPayload {
     password: Zeroizing<String>,
     captcha_id: Option<String>,
     captcha_str: Option<String>,
+    #[serde(default)]
+    otp: Option<Zeroizing<String>>,
 }
 
 impl AuthPayload {
@@ -63,6 +65,7 @@ impl AuthPayload {
             && self.password.len() < 256
             && self.captcha_id.as_ref().is_none_or(|c| c.len() < 256)
             && self.captcha_str.as_ref().is_none_or(|c| c.len() < 256)
+            && self.otp.as_ref().is_none_or(|o| o.len() < 32)
     }
 }
 
@@ -88,6 +91,9 @@ pub enum AuthResponse {
     AuthNotEnabled,
     InvalidCredentials(Option<String>),
     CaptchaRequired(String),
+    OtpRequested,
+    OtpSetup(String),
+    OtpInvalid,
 }
 
 async fn run_gate(

@@ -163,13 +163,18 @@ impl MasterHandlers {
         let Some(ref auth) = self.context.authenticator else {
             return Ok(AuthResponse::AuthNotEnabled);
         };
-        match auth.verify(&p.user, &p.password).await {
+        match auth
+            .verify(&p.user, &p.password, p.otp.as_ref().map(|z| z.as_str()))
+            .await
+        {
             crate::authenticator::AuthResult::Success { groups } => {
-                if !self.verify_captcha(
-                    p.captcha_id.as_deref(),
-                    p.captcha_str.as_deref(),
-                    remote_ip,
-                )? {
+                if p.otp.is_none()
+                    && !self.verify_captcha(
+                        p.captcha_id.as_deref(),
+                        p.captcha_str.as_deref(),
+                        remote_ip,
+                    )?
+                {
                     maybe_need_captcha!(true);
                 }
                 self.context.report_auth_success(remote_ip, &p.user);
@@ -181,6 +186,14 @@ impl MasterHandlers {
                 warn!(ip = %remote_ip, user = %p.user, "Failed login attempt");
                 maybe_need_captcha!(false);
                 Ok(AuthResponse::InvalidCredentials(None))
+            }
+            crate::authenticator::AuthResult::OtpRequested => Ok(AuthResponse::OtpRequested),
+            crate::authenticator::AuthResult::OtpSetup { secret } => {
+                Ok(AuthResponse::OtpSetup(secret))
+            }
+            crate::authenticator::AuthResult::OtpInvalid => {
+                self.context.report_auth_failed(remote_ip, &p.user);
+                Ok(AuthResponse::OtpInvalid)
             }
         }
     }

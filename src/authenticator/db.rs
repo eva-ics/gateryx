@@ -88,14 +88,17 @@ impl Authenticator for DbAuth {
             }
         }
     }
-    async fn verify(&self, login: &str, password: &str) -> AuthResult {
+    async fn verify(&self, login: &str, password: &str, _otp: Option<&str>) -> AuthResult {
         let random_sleeper = RandomSleeper::new(100..300);
         match self.verify_password(login, password).await {
             AuthResult::Success { groups } => {
                 random_sleeper.sleep().await;
                 AuthResult::Success { groups }
             }
-            AuthResult::Failure => {
+            AuthResult::Failure
+            | AuthResult::OtpRequested
+            | AuthResult::OtpSetup { .. }
+            | AuthResult::OtpInvalid => {
                 random_sleeper.sleep().await;
                 synth_sleep().await;
                 AuthResult::Failure
@@ -128,7 +131,10 @@ impl Authenticator for DbAuth {
     ) -> Result<()> {
         match self.verify_password(login, old_password).await {
             AuthResult::Success { .. } => self.set_password_forced(login, new_password).await,
-            AuthResult::Failure => Err(Error::failed("authentication failed")),
+            AuthResult::Failure
+            | AuthResult::OtpRequested
+            | AuthResult::OtpSetup { .. }
+            | AuthResult::OtpInvalid => Err(Error::failed("authentication failed")),
         }
     }
     async fn list(&self) -> Result<Vec<UserInfo>> {
