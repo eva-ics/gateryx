@@ -13,6 +13,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::{ConfigCheckIssue, Error, Result, bp, passkeys, storage::Storage, tokens};
 
 pub mod db;
+pub mod eva;
 pub mod htpasswd;
 pub mod ldap;
 
@@ -183,6 +184,7 @@ pub enum AuthenticatorConfig {
         policy: Option<PasswordPolicy>,
     },
     Ldap(ldap::Config),
+    Eva(eva::Config),
 }
 
 impl AuthenticatorConfig {
@@ -218,6 +220,7 @@ impl AuthenticatorConfig {
                     }
                 }
             }
+            AuthenticatorConfig::Eva { .. } => {}
         }
         issues
     }
@@ -239,6 +242,7 @@ impl AuthenticatorConfig {
                     *ca = work_dir.join(&*ca);
                 }
             }
+            AuthenticatorConfig::Eva { .. } => {}
         }
     }
 }
@@ -319,6 +323,10 @@ pub async fn create_authenticator(
         }
         AuthenticatorConfig::Ldap(ldap_config) => {
             let auth = ldap::LdapAuthenticator::create(ldap_config).await?;
+            Ok(Box::new(auth))
+        }
+        AuthenticatorConfig::Eva(eva_config) => {
+            let auth = eva::EvaAuthenticator::new(eva_config);
             Ok(Box::new(auth))
         }
     }
