@@ -23,6 +23,11 @@ name = "gateryx"
 path = "src/bin/admin-cli.rs"
 required-features = ["admin-cli"]
 
+[[bin]]
+name = "gateryx-breakin-sim"
+path = "src/bin/breakin-sim.rs"
+required-features = ["breakin-sim"]
+
 [dependencies]
 async-channel = "2.5.0"
 async-trait = "0.1.89"
@@ -101,6 +106,7 @@ libproc = "0.14.11"
 [features]
 server = ["dep:clap", "dep:mimalloc", "dep:captcha"]
 admin-cli = ["dep:clap", "dep:reqwest", "dep:colored"]
+breakin-sim = ["dep:clap", "dep:reqwest"]
 default = ["admin-cli"]
 full = ["server", "admin-cli"]
 openssl-vendored = ["openssl/vendored"]

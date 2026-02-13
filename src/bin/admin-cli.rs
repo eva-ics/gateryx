@@ -195,6 +195,11 @@ impl RpcClient {
                 ));
             }
         }
+        let mut body = http_req.body().clone().to_vec();
+        // push two spaces
+        body.extend_from_slice(b"  ");
+        // replace request body
+        *http_req.body_mut() = Bytes::from(body);
         let r_req = reqwest::Request::try_from(http_req).map_err(Error::failed)?;
         let response = self
             .web_client
