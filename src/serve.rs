@@ -483,7 +483,7 @@ async fn handle_http_request(
             };
             match context
                 .master_client
-                .validate_token(&token_str, app.allow_tokens())
+                .validate_token(&token_str, app.allow_tokens(), remote_ip)
                 .await
             {
                 Ok(tokens::ValidationResponse::Valid { token_s, claims: c }) => {

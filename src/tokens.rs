@@ -1,5 +1,6 @@
 use std::{
     cmp::max,
+    net::IpAddr,
     path::{Path, PathBuf},
 };
 
@@ -46,6 +47,9 @@ pub struct Config {
     pub domain: Option<String>,
     #[serde(default = "default_token_cookie_name")]
     pub cookie: String,
+    /// When true, JWTs include the client IP and are only accepted when the request IP matches.
+    #[serde(default)]
+    pub stick_to_ip: bool,
 }
 
 impl Config {
@@ -83,6 +87,9 @@ pub struct Claims {
     pub apps: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<String>,
+    /// Client IP at issue time when stick_to_ip is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip: Option<String>,
 }
 
 impl Claims {
@@ -216,6 +223,7 @@ pub struct Factory {
     public_key: PublicKey,
     public_pem: String,
     openid_configuration: String,
+    stick_to_ip: bool,
 }
 
 impl Factory {
@@ -286,6 +294,7 @@ impl Factory {
             public_key,
             public_pem,
             openid_configuration,
+            stick_to_ip: config.stick_to_ip,
         })
     }
     #[allow(dead_code)]
@@ -300,6 +309,7 @@ impl Factory {
         // in seconds!
         exp: Option<u64>,
         admin: bool,
+        remote_ip: Option<IpAddr>,
     ) -> Result<(String, u64)> {
         if !admin && !apps.is_empty() {
             let Some(exp) = exp else {
@@ -312,6 +322,11 @@ impl Factory {
             }
         }
         let exp = Timestamp::now().as_secs() + exp.unwrap_or(self.expiration_seconds);
+        let ip = if self.stick_to_ip {
+            remote_ip.map(|a| a.to_string())
+        } else {
+            None
+        };
         let claims = Claims {
             sub: sub.as_ref().to_string(),
             iat: Timestamp::now().as_secs(),
@@ -320,6 +335,7 @@ impl Factory {
             jti: uuid::Uuid::new_v4().to_string(),
             apps,
             groups,
+            ip,
         };
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256),
@@ -334,6 +350,7 @@ impl Factory {
         token_str: String,
         storage: &dyn Storage,
         allow_app_tokens: bool,
+        current_ip: IpAddr,
     ) -> ValidationResponse {
         let Ok(token) = jsonwebtoken::decode::<Claims>(
             &token_str,
@@ -349,6 +366,19 @@ impl Factory {
         if self.issuer_uri.as_deref() != token.claims.iss.as_deref() {
             debug!(expected_iss = ?self.issuer_uri, token_iss = ?token.claims.iss, "Token issuer mismatch");
             return ValidationResponse::Invalid;
+        }
+        if self.stick_to_ip {
+            if let Some(ref token_ip) = token.claims.ip {
+                if current_ip.to_string() != *token_ip {
+                    debug!(
+                        user = %token.claims.sub,
+                        token_ip = %token_ip,
+                        current_ip = %current_ip,
+                        "Token IP does not match request IP"
+                    );
+                    return ValidationResponse::Invalid;
+                }
+            }
         }
         // double check expiration
         if Timestamp::from_secs(token.claims.exp) < Timestamp::now() {

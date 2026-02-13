@@ -375,7 +375,10 @@ async fn rpc_regular(
         "gate.logout" => Ok((Value::Null, logout_hmap!())),
         "gate.passkey.register.start" => {
             let token_str = get_token_str(headers, context)?;
-            let res = context.master_client.passkey_reg_start(token_str).await?;
+            let res = context
+                .master_client
+                .passkey_reg_start(token_str, remote_ip)
+                .await?;
             Ok((to_value(res)?, None))
         }
         "gate.passkey.register.finish" => {
@@ -383,7 +386,7 @@ async fn rpc_regular(
             let reg: RegisterPublicKeyCredential = serde_json::from_value(params)?;
             context
                 .master_client
-                .passkey_reg_finish(token_str, reg)
+                .passkey_reg_finish(token_str, reg, remote_ip)
                 .await?;
             Ok(no_reply!())
         }
@@ -432,19 +435,30 @@ async fn rpc_regular(
         "gate.passkey.present" => {
             let token_str = get_token_str(headers, context)?;
             Ok((
-                to_value(context.master_client.passkey_present(token_str).await?)?,
+                to_value(
+                    context
+                        .master_client
+                        .passkey_present(token_str, remote_ip)
+                        .await?,
+                )?,
                 None,
             ))
         }
         "gate.passkey.delete" => {
             let token_str = get_token_str(headers, context)?;
-            context.master_client.passkey_delete(token_str).await?;
+            context
+                .master_client
+                .passkey_delete(token_str, remote_ip)
+                .await?;
             info!(ip = %remote_ip, "User deleted passkey");
             Ok(no_reply!())
         }
         "gate.invalidate" => {
             let token_str = get_token_str(headers, context)?;
-            context.master_client.invalidate(token_str).await?;
+            context
+                .master_client
+                .invalidate(token_str, remote_ip)
+                .await?;
             warn!(ip = %remote_ip, "User invalidated tokens");
             Ok((Value::Null, logout_hmap!()))
         }
@@ -467,6 +481,7 @@ async fn rpc_regular(
                     &token_str,
                     app.hosts.iter().map(String::as_str).collect(),
                     p.exp,
+                    remote_ip,
                 )
                 .await?;
             info!(ip = %remote_ip, app = %p.app, "Issued audience token for app");

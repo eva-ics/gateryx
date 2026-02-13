@@ -217,8 +217,9 @@ impl Client {
         &'a self,
         token_str: &'a str,
         allow_app_tokens: bool,
+        remote_ip: IpAddr,
     ) -> impl Future<Output = Result<tokens::ValidationResponse>> + 'a {
-        self.call(ApiMethod::ValidateToken, (token_str, allow_app_tokens))
+        self.call(ApiMethod::ValidateToken, (token_str, allow_app_tokens, remote_ip))
     }
     pub fn token_factory_public(&self) -> impl Future<Output = Result<Option<tokens::Public>>> {
         self.call(ApiMethod::TokenFactoryPublic, ())
@@ -228,11 +229,16 @@ impl Client {
         token_str: &'a str,
         aud: Vec<&'a str>,
         exp: u64,
+        remote_ip: IpAddr,
     ) -> impl Future<Output = Result<Zeroizing<String>>> {
-        self.call(ApiMethod::IssueAppsToken, (token_str, aud, exp))
+        self.call(ApiMethod::IssueAppsToken, (token_str, aud, exp, remote_ip))
     }
-    pub fn invalidate(&self, token_str: Zeroizing<String>) -> impl Future<Output = Result<bool>> {
-        self.call(ApiMethod::UserInvalidate, token_str)
+    pub fn invalidate(
+        &self,
+        token_str: Zeroizing<String>,
+        remote_ip: IpAddr,
+    ) -> impl Future<Output = Result<bool>> {
+        self.call(ApiMethod::UserInvalidate, (token_str, remote_ip))
     }
     pub fn get_captcha_secret(
         &self,
@@ -270,14 +276,16 @@ impl Client {
     pub fn passkey_present(
         &self,
         token_str: Zeroizing<String>,
+        remote_ip: IpAddr,
     ) -> impl Future<Output = Result<Option<bool>>> {
-        self.call(ApiMethod::PasskeyPresent, token_str)
+        self.call(ApiMethod::PasskeyPresent, (token_str, remote_ip))
     }
     pub fn passkey_delete(
         &self,
         token_str: Zeroizing<String>,
+        remote_ip: IpAddr,
     ) -> impl Future<Output = Result<bool>> {
-        self.call(ApiMethod::PasskeyDelete, token_str)
+        self.call(ApiMethod::PasskeyDelete, (token_str, remote_ip))
     }
     pub fn passkey_auth_start(
         &self,
@@ -296,15 +304,17 @@ impl Client {
     pub fn passkey_reg_start(
         &self,
         token_str: Zeroizing<String>,
+        remote_ip: IpAddr,
     ) -> impl Future<Output = Result<CreationChallengeResponse>> {
-        self.call(ApiMethod::PasskeyRegStart, token_str)
+        self.call(ApiMethod::PasskeyRegStart, (token_str, remote_ip))
     }
     pub fn passkey_reg_finish(
         &self,
         token_str: Zeroizing<String>,
         reg: RegisterPublicKeyCredential,
+        remote_ip: IpAddr,
     ) -> impl Future<Output = Result<bool>> {
-        self.call(ApiMethod::PasskeyRegFinish, (token_str, reg))
+        self.call(ApiMethod::PasskeyRegFinish, (token_str, reg, remote_ip))
     }
     pub fn admin(
         &self,
