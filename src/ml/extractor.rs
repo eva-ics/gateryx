@@ -28,6 +28,7 @@ pub struct RequestMeta {
     pub requests_last_window: usize,
     pub unique_paths_last_window: usize,
     pub mean_body_size_last_window: f64,
+    pub num_404s_last_window: usize,
 
     pub r: String,
 }
@@ -37,6 +38,7 @@ struct IpWindowEntry {
     ts: u64,
     path_hash: u64,
     body_size: usize,
+    is_404: bool,
 }
 
 #[derive(Debug)]
@@ -44,6 +46,7 @@ struct IpState {
     deque: VecDeque<IpWindowEntry>,
     unique_paths: HashSet<u64>,
     sum_body_size: usize,
+    num_404s: usize,
 }
 
 impl IpState {
@@ -52,6 +55,7 @@ impl IpState {
             deque: VecDeque::new(),
             unique_paths: HashSet::new(),
             sum_body_size: 0,
+            num_404s: 0,
         }
     }
 
@@ -75,10 +79,14 @@ impl IpState {
     fn recompute(&mut self) {
         self.unique_paths.clear();
         self.sum_body_size = 0;
+        self.num_404s = 0;
 
         for e in &self.deque {
             self.unique_paths.insert(e.path_hash);
             self.sum_body_size += e.body_size;
+            if e.is_404 {
+                self.num_404s += 1;
+            }
         }
     }
 
@@ -97,6 +105,10 @@ impl IpState {
         } else {
             self.sum_body_size as f64 / self.deque.len() as f64
         }
+    }
+
+    fn num_404s(&self) -> usize {
+        self.num_404s
     }
 }
 
@@ -154,7 +166,7 @@ impl RequestFeatureExtractor {
 
         let path_hash = simple_hash_str(&full_path);
 
-        let (requests, unique_paths, mean_body) = {
+        let (requests, unique_paths, mean_body, num_404s) = {
             let mut map = self.inner.lock();
             let st = map.entry(ip_hash).or_insert_with(IpState::new);
             st.push_event(
@@ -162,10 +174,16 @@ impl RequestFeatureExtractor {
                     ts,
                     path_hash,
                     body_size,
+                    is_404: false,
                 },
                 self.window_secs,
             );
-            (st.requests(), st.unique_paths(), st.mean_body_size())
+            (
+                st.requests(),
+                st.unique_paths(),
+                st.mean_body_size(),
+                st.num_404s(),
+            )
         };
 
         let r = format!(
@@ -200,7 +218,25 @@ impl RequestFeatureExtractor {
             requests_last_window: requests,
             unique_paths_last_window: unique_paths,
             mean_body_size_last_window: mean_body,
+            num_404s_last_window: num_404s,
             r,
+        }
+    }
+
+    /// Analyze response and update 404 tracking
+    pub fn analyze(&self, remote_ip: IpAddr, status_code: u16) {
+        if status_code != 404 {
+            return;
+        }
+
+        let ip_hash = hash_ip(&remote_ip);
+        let mut map = self.inner.lock();
+        if let Some(st) = map.get_mut(&ip_hash) {
+            // Mark the most recent entry as a 404
+            if let Some(entry) = st.deque.back_mut() {
+                entry.is_404 = true;
+                st.num_404s += 1;
+            }
         }
     }
 }

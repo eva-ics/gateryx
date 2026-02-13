@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use http::{header::HeaderName, Response};
+use http::{Response, header::HeaderName};
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
 use serde::Deserialize;

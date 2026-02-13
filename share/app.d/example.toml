@@ -41,6 +41,9 @@ compress = true
 #use_auth = true
 # For remote HTTPS targets, skip TLS verification (default: false)
 #skip_remote_tls_verify = false
+# Allow access to Gateryx API endpoints (/.gateryx/*) for this app (default: false)
+# When enabled, the proxied app can access authentication, RPC, and other Gateryx APIs
+#gateryx_api = false
 # allowed hosts/networks (ip addresses only), allowed all by default
 #allow = ["127.0.0.1/32"]
 # allow per-application tokens (default: true)

@@ -67,6 +67,8 @@ pub struct Config {
     pub hidden: bool,
     #[serde(default)]
     pub skip_remote_tls_verify: bool,
+    #[serde(default)]
+    pub gateryx_api: bool,
     #[zeroize(skip)]
     pub websocket: Option<crate::ws::Config>,
     #[zeroize(skip)]
