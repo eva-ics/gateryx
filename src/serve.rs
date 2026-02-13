@@ -140,6 +140,12 @@ impl ServeApp {
             ServeApp::VirtualApp(_) => &[],
         }
     }
+    fn api_allowed(&self) -> bool {
+        match self {
+            ServeApp::App(app) => app.gateryx_api,
+            ServeApp::VirtualApp(_) => true,
+        }
+    }
     async fn resolve_force(context: &Context, app_name: &str) -> Option<Self> {
         if let Some(v) = context.virtual_app_map.get_by_id(app_name) {
             Some(ServeApp::VirtualApp(v))
@@ -424,23 +430,26 @@ async fn handle_http_request(
     if request.uri().path() == "/robots.txt" {
         return Ok(deny_robots().await);
     }
-    if request.uri().path() == URI_RPC {
-        if request.method() != Method::POST {
-            return Ok(http_response(405, "Method Not Allowed").await);
+
+    if app.api_allowed() {
+        if request.uri().path() == URI_RPC {
+            if request.method() != Method::POST {
+                return Ok(http_response(405, "Method Not Allowed").await);
+            }
+            return rpc::handle(request, remote_ip, context).await;
         }
-        return rpc::handle(request, remote_ip, context).await;
-    }
-    if request.uri().path() == URI_RPC_ADMIN {
-        if request.method() != Method::POST {
-            return Ok(http_response(405, "Method Not Allowed").await);
+        if request.uri().path() == URI_RPC_ADMIN {
+            if request.method() != Method::POST {
+                return Ok(http_response(405, "Method Not Allowed").await);
+            }
+            return rpc::handle_admin(request, remote_ip, context).await;
         }
-        return rpc::handle_admin(request, remote_ip, context).await;
-    }
-    if request.uri().path() == URI_AUTH_CAPTCHA && request.method() == Method::GET {
-        return Ok(serve_captcha(request, remote_ip, context).await);
-    }
-    if request.uri().path().starts_with(URI_AUTH_PREFIX) {
-        return Ok(serve_auth(request, remote_ip, context).await);
+        if request.uri().path() == URI_AUTH_CAPTCHA && request.method() == Method::GET {
+            return Ok(serve_captcha(request, remote_ip, context).await);
+        }
+        if request.uri().path().starts_with(URI_AUTH_PREFIX) {
+            return Ok(serve_auth(request, remote_ip, context).await);
+        }
     }
     if let ServeApp::VirtualApp(ref v) = app
         && let Some(res) = v
@@ -765,6 +774,13 @@ async fn handle_stream<S>(
                     )
                     .await;
                     debug!(ip = ?ip, response = ?res);
+
+                    if let Some(ref extractor) = context.meta_extractor
+                        && let Ok(ref response) = res
+                    {
+                        extractor.analyze(ip, response.status().as_u16());
+                    }
+
                     if let Some(mut log_record) = log_record {
                         log_record.set_size(res.as_ref().map_or(0, |r| {
                             usize::try_from(r.body().size_hint().upper().unwrap_or_default())
