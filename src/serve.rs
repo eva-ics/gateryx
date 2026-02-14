@@ -119,6 +119,12 @@ impl ServeApp {
             ServeApp::VirtualApp(_) => false,
         }
     }
+    fn gateryx_api_enabled(&self) -> bool {
+        match self {
+            ServeApp::App(app) => app.gateryx_api,
+            ServeApp::VirtualApp(_) => true,
+        }
+    }
     fn use_auth(&self) -> bool {
         match self {
             ServeApp::App(app) => app.use_auth,
@@ -427,23 +433,25 @@ async fn handle_http_request(
     if request.uri().path() == "/robots.txt" {
         return Ok(deny_robots().await);
     }
-    if request.uri().path() == URI_RPC {
-        if request.method() != Method::POST {
-            return Ok(http_response(405, "Method Not Allowed").await);
+    if app.gateryx_api_enabled() {
+        if request.uri().path() == URI_RPC {
+            if request.method() != Method::POST {
+                return Ok(http_response(405, "Method Not Allowed").await);
+            }
+            return rpc::handle(request, remote_ip, context).await;
         }
-        return rpc::handle(request, remote_ip, context).await;
-    }
-    if request.uri().path() == URI_RPC_ADMIN {
-        if request.method() != Method::POST {
-            return Ok(http_response(405, "Method Not Allowed").await);
+        if request.uri().path() == URI_RPC_ADMIN {
+            if request.method() != Method::POST {
+                return Ok(http_response(405, "Method Not Allowed").await);
+            }
+            return rpc::handle_admin(request, remote_ip, context).await;
         }
-        return rpc::handle_admin(request, remote_ip, context).await;
-    }
-    if request.uri().path() == URI_AUTH_CAPTCHA && request.method() == Method::GET {
-        return Ok(serve_captcha(request, remote_ip, context).await);
-    }
-    if request.uri().path().starts_with(URI_AUTH_PREFIX) {
-        return Ok(serve_auth(request, remote_ip, context).await);
+        if request.uri().path() == URI_AUTH_CAPTCHA && request.method() == Method::GET {
+            return Ok(serve_captcha(request, remote_ip, context).await);
+        }
+        if request.uri().path().starts_with(URI_AUTH_PREFIX) {
+            return Ok(serve_auth(request, remote_ip, context).await);
+        }
     }
     if let ServeApp::VirtualApp(ref v) = app
         && let Some(res) = v
