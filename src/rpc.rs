@@ -4,7 +4,7 @@ use std::net::IpAddr;
 
 use http::{HeaderMap, Request, Response};
 use http_body_util::{BodyExt as _, Full};
-use hyper::body::Incoming;
+use hyper::body::{Body, Incoming};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, to_value};
 use tracing::{error, info, warn};
@@ -24,6 +24,8 @@ const JSON_RPC_VERSION: &str = "2.0";
 pub const URI_RPC: &str = "/.gateryx/rpc";
 
 pub const URI_RPC_ADMIN: &str = "/.gateryx/rpc.admin";
+
+const MAX_RPC_BODY_SIZE: usize = 8192;
 
 #[derive(Deserialize, Default, Copy, Clone)]
 #[serde(rename_all = "lowercase")]
@@ -582,11 +584,30 @@ pub(crate) async fn handle(
         error!(ip = %remote_ip, method = %parts.method, "Invalid RPC request method");
         return Ok(http_response(405, "Method Not Allowed").await);
     }
+    let size_hint_upper = body.size_hint().upper();
+    if size_hint_upper.is_some_and(|u| u > u64::try_from(MAX_RPC_BODY_SIZE).unwrap()) {
+        error!(
+            ip = %remote_ip,
+            size_hint = ?size_hint_upper,
+            max = MAX_RPC_BODY_SIZE,
+            "RPC request body too large (size hint)"
+        );
+        return Ok(http_response(413, "Payload Too Large").await);
+    }
     let Ok(body_collected) = body.collect().await else {
         error!(ip = %remote_ip, "Failed to read RPC request body");
         return Ok(http_response(400, "Bad Request").await);
     };
     let bytes = body_collected.to_bytes();
+    if bytes.len() > MAX_RPC_BODY_SIZE {
+        error!(
+            ip = %remote_ip,
+            size = bytes.len(),
+            max = MAX_RPC_BODY_SIZE,
+            "RPC request body too large"
+        );
+        return Ok(http_response(413, "Payload Too Large").await);
+    }
     let rpc_request = match RpcRequest::try_from(&bytes[..]) {
         Ok(r) => r,
         Err(e) => {
