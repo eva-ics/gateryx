@@ -7,12 +7,13 @@
 <img src="https://raw.githubusercontent.com/eva-ics/gateryx/main/gateryx-logo.png"
 width="100" />
 
-Gateryx is a Web Application Firewall (WAF) solution which delivers a fully
-integrated, high-security web gateway by combining a next-generation reverse
-proxy and a modern identity provider into a single, streamlined product. Built
-on fast, battle-tested elliptic-curve cryptography (P-256), it provides
-passwordless Passkey authentication, ES256-signed JWT and OIDC tokens, and
-ECDSA-secured administrative access.
+[Gateryx](https://www.bohemia-automation.com/software/gateryx/) is a Web
+Application Firewall (WAF) solution which delivers a fully integrated,
+high-security web gateway by combining a next-generation reverse proxy and a
+modern identity provider into a single, streamlined product. Built on fast,
+battle-tested elliptic-curve cryptography (P-256), it provides passwordless
+Passkey authentication, ES256-signed JWT and OIDC tokens, and ECDSA-secured
+administrative access.
 
 [Technical Documentation](https://info.bma.ai/en/actual/gateryx/index.html)
 
