@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, io::Cursor, mem, net::IpAddr, sync::Arc, time::Duration};
 
-use http::{HeaderValue, Method, header, uri::PathAndQuery};
+use http::{HeaderValue, Method, header, header::HeaderName, uri::PathAndQuery};
 use http_body_util::{BodyExt as _, Full};
 use hyper::{
     Request, Response, Uri,
@@ -697,6 +697,24 @@ async fn handle_http_request(
     Ok(res)
 }
 
+fn resolve_remote_ip(
+    connection_ip: IpAddr,
+    request: &Request<Incoming>,
+    remote_real_ip_header: Option<&HeaderName>,
+) -> IpAddr {
+    let Some(header_name) = remote_real_ip_header else {
+        return connection_ip;
+    };
+    let Some(value) = request.headers().get(header_name) else {
+        return connection_ip;
+    };
+    let Ok(s) = value.to_str() else {
+        return connection_ip;
+    };
+    let first = s.trim().split(',').next().map_or(s.trim(), str::trim);
+    first.parse().unwrap_or(connection_ip)
+}
+
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 async fn handle_stream<S>(
     io: TokioIo<S>,
@@ -747,15 +765,17 @@ async fn handle_stream<S>(
                 let force_app = force_app.clone();
                 let allow = allow.clone();
                 async move {
+                    let remote_ip =
+                        resolve_remote_ip(ip, &req, context.remote_real_ip_header.as_ref());
                     let log_record = if context.http_logger.is_some() {
-                        Some(LogRecord::new(ip, &req, with_tls))
+                        Some(LogRecord::new(remote_ip, &req, with_tls))
                     } else {
                         None
                     };
                     let mut token_sub = None;
                     let mut res = handle_http_request(
                         req,
-                        ip,
+                        remote_ip,
                         upstream_client,
                         dangerous_upstream_client,
                         &context,
@@ -767,7 +787,7 @@ async fn handle_stream<S>(
                         &mut token_sub,
                     )
                     .await;
-                    debug!(ip = ?ip, response = ?res);
+                    debug!(ip = ?remote_ip, response = ?res);
                     if let Some(mut log_record) = log_record {
                         log_record.set_size(res.as_ref().map_or(0, |r| {
                             usize::try_from(r.body().size_hint().upper().unwrap_or_default())

@@ -90,6 +90,10 @@ protocol = "http2"
 
 [server]
 http_log =  "/var/gateryx/log/access.log"
+# when set, use this HTTP header value as the client IP instead of the
+# connection IP (e.g. "X-Forwarded-For" or "X-Real-IP"); for comma-separated
+# values the first element is used
+#remote_real_ip = "X-Forwarded-For"
 # number of master threads (responsible for logging and IDP)
 master_threads = 1
 # number of worker threads (responsible for processing web requests)

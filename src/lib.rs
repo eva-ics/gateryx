@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use http::Response;
+use http::{Response, header::HeaderName};
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
 use serde::Deserialize;
@@ -127,11 +127,20 @@ pub struct ServerConfig {
     #[zeroize(skip)]
     pub max_body_size: Option<Numeric>,
     pub user: Option<String>,
+    /// When set, use the value of this HTTP header as the client IP instead of the connection IP (e.g. "X-Forwarded-For" or "X-Real-IP"). For comma-separated values (e.g. X-Forwarded-For), the first element is used.
+    pub remote_real_ip: Option<String>,
 }
 
 impl ServerConfig {
     pub fn check(&self, _config_dir: &Path) -> Vec<ConfigCheckIssue> {
         let mut issues = Vec::new();
+        if let Some(ref h) = self.remote_real_ip
+            && HeaderName::from_bytes(h.as_bytes()).is_err()
+        {
+            issues.push(ConfigCheckIssue::Error(format!(
+                "server.remote_real_ip is not a valid HTTP header name: {h:?}"
+            )));
+        }
         if self.max_body_size.is_none() {
             issues.push(ConfigCheckIssue::Warning(
                 "No max_body_size configured, defaulting to unlimited".to_string(),
