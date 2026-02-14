@@ -234,7 +234,7 @@ fn token_cookie_hmap(
     }
     let domain = context.token_domain_if_matches(host);
     let mut cookie_str = format!(
-        "{}={}; Path=/; SameSite=Lax",
+        "{}={}; Path=/; SameSite=Lax; HttpOnly",
         context.token_cookie_name, &**token_str
     );
     if let Some(d) = domain {
