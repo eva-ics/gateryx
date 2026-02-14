@@ -53,7 +53,7 @@ use crate::{
     gate::worker::Context,
     util::{
         http_internal_server_error, http_json_response, http_response, http_ser_json_response,
-        resolve_host, synth_sleep,
+        path_contains_traversal, resolve_host, synth_sleep,
     },
 };
 
@@ -136,6 +136,9 @@ impl Plain {
         "plain"
     }
     async fn file(&self, request: Request<Full<Bytes>>) -> ByteResponse {
+        if path_contains_traversal(request.uri().path()) {
+            return http_response(400, "Bad Request").await;
+        }
         match self.www_root.clone().serve(request).await {
             Ok(v) => {
                 let (parts, body) = v.into_parts();
@@ -225,6 +228,9 @@ impl System {
         Arc::new(Self { www_root, allow })
     }
     async fn system_file(&self, request: Request<Full<Bytes>>) -> ByteResponse {
+        if path_contains_traversal(request.uri().path()) {
+            return http_response(400, "Bad Request").await;
+        }
         match self.www_root.clone().serve(request).await {
             Ok(v) => {
                 let (parts, body) = v.into_parts();

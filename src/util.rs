@@ -126,6 +126,12 @@ pub fn resolve_host(request: &Request<Incoming>) -> Option<String> {
     None
 }
 
+/// Returns true if the path contains "..", indicating path traversal.
+#[inline]
+pub fn path_contains_traversal(path: &str) -> bool {
+    path.contains("../")
+}
+
 pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let cookie_headers = headers.get_all("cookie");
     for header_value in cookie_headers {

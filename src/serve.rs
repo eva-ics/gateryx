@@ -53,7 +53,7 @@ use crate::{
     tokens,
     util::{
         self, AllowRemoteAny, downgrade_to_http11, http_internal_server_error, http_response,
-        http_response_forbidden, resolve_host, synth_sleep,
+        http_response_forbidden, path_contains_traversal, resolve_host, synth_sleep,
     },
     vapp::VirtualApp,
     ws,
@@ -91,6 +91,9 @@ async fn auth_file(mut request: Request<Full<Bytes>>, context: &Context) -> Byte
         .to_string()
         .trim_start_matches(URI_AUTH)
         .to_owned();
+    if path_contains_traversal(&relative_uri_str) {
+        return http_response(400, "Bad Request").await;
+    }
     *request.uri_mut() = Uri::try_from(relative_uri_str).unwrap();
     match auth_www_static.clone().serve(request).await {
         Ok(v) => {
