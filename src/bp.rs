@@ -183,7 +183,7 @@ impl BreakinProtection {
         let count = {
             let db = self.db.lock();
             let mut stmt = db.prepare(
-                "SELECT COUNT(*) AS c FROM captcha WHERE id = ?1 AND ip = $2 AND value = ?3",
+                "SELECT COUNT(*) AS c FROM captcha WHERE id = ?1 AND ip = ?2 AND value = ?3",
             )?;
             stmt.bind((1, captcha_id.to_string().as_str()))?;
             stmt.bind((2, ip.to_string().as_str()))?;
