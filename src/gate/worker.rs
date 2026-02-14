@@ -1,5 +1,6 @@
 use std::{net::IpAddr, os::fd::FromRawFd as _, sync::Arc, time::Duration};
 
+use http::header::HeaderName;
 use crate::{
     AppHostMap, Config, Result, VAppMap,
     admin::TransferredRequest,
@@ -65,6 +66,8 @@ pub struct ContextData {
     pub token_cookie_name: String,
     pub headers: WebHeaders,
     pub reply_401_to_user_agents: UserAgentList,
+    /// When set, the value of this header is used as the client IP instead of the connection IP.
+    pub remote_real_ip_header: Option<HeaderName>,
 }
 
 impl ContextData {
@@ -386,6 +389,11 @@ pub async fn prepare_privileged(
             .as_ref()
             .map(|auth_config| auth_config.reply_401_to_user_agents.clone())
             .unwrap_or_default(),
+        remote_real_ip_header: config
+            .server
+            .remote_real_ip
+            .as_ref()
+            .and_then(|s| HeaderName::from_bytes(s.as_bytes()).ok()),
     };
     if let Some(ref auth_config) = config.auth {
         context_data
