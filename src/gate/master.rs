@@ -34,7 +34,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, eapi, is_developent_mode,
+    Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, eapi, is_development_mode,
     logger::Logger,
     passkeys,
     storage::{self, Storage},
@@ -730,7 +730,7 @@ async fn run_master_api_impl(
         token_domain: None,
         token_domain_dot_prefixed: None,
         storage: storage.clone(),
-        development: is_developent_mode(),
+        development: is_development_mode(),
     };
     if let Some(ref admin_config) = config.admin {
         let admin_auth = admin::Auth::init(admin_config).await?;

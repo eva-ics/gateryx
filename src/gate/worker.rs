@@ -5,7 +5,7 @@ use crate::{
     admin::TransferredRequest,
     authenticator::UserAgentList,
     headers::WebHeaders,
-    is_developent_mode,
+    is_development_mode,
     logger::{LogSender, MetaLogSender},
     ml,
     passkeys::{
@@ -393,7 +393,7 @@ pub async fn prepare_privileged(
         tls_config: Arc::new(tls_config),
         dangerous_tls_config: dangerous_tls_config.map(Arc::new),
         websocket_config: config.websocket_default.clone(),
-        development: is_developent_mode(),
+        development: is_development_mode(),
         master_client: Client::uninitialized(),
         token_cookie_name: <_>::default(),
         headers: config.headers.clone().try_into()?,

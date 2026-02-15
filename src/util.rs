@@ -126,10 +126,16 @@ pub fn resolve_host(request: &Request<Incoming>) -> Option<String> {
     None
 }
 
-/// Returns true if the path contains "..", indicating path traversal.
+/// Returns true if the path contains traversal after percent-decoding, so path can never escape the docroot.
 #[inline]
 pub fn path_contains_traversal(path: &str) -> bool {
-    path.contains("../")
+    let Ok(decoded) = urlencoding::decode(path) else {
+        return true;
+    };
+    decoded.contains("/../")
+        || decoded.ends_with("/..")
+        || decoded.starts_with("../")
+        || decoded == ".."
 }
 
 pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {

@@ -50,7 +50,7 @@ pub type ByteResponse = Response<BoxBody<Bytes, StdError>>;
 pub type HByteResult = std::result::Result<ByteResponse, hyper::http::Error>;
 pub type HResult<T> = std::result::Result<T, hyper::http::Error>;
 
-fn is_developent_mode() -> bool {
+fn is_development_mode() -> bool {
     std::env::var("GATERYX_DEVELOPMENT").is_ok_and(|v| v == "1")
 }
 

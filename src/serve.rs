@@ -180,6 +180,7 @@ fn insert_jwt_assertion(
     jwt_token: Option<&str>,
     request: &mut Request<Incoming>,
     context: &Context,
+    remote_ip: IpAddr,
 ) {
     let Some(token) = jwt_token else {
         return;
@@ -187,7 +188,8 @@ fn insert_jwt_assertion(
     let header_value: HeaderValue = match token.parse() {
         Ok(v) => v,
         Err(e) => {
-            error!(error = %e, token = %token, "Invalid JWT header value");
+            error!(ip = %remote_ip, "Invalid JWT header value");
+            debug!(ip = %remote_ip, error = ?e, token = %token, "Invalid JWT header value");
             return;
         }
     };
@@ -608,7 +610,7 @@ async fn handle_http_request(
         {
             request.headers_mut().insert(&context.headers.user, s);
         }
-        insert_jwt_assertion(jwt_token.as_deref(), &mut request, context);
+        insert_jwt_assertion(jwt_token.as_deref(), &mut request, context, remote_ip);
     }
     if is_websocket {
         if app.websocket.as_ref().is_some_and(|w| w.strict) {
