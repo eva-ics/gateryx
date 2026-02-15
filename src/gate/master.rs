@@ -548,8 +548,14 @@ impl RpcHandlers for MasterHandlers {
                     return Err(Error::invalid_data("Audience list is empty").into());
                 }
                 let sleeper = RandomSleeper::new(100..300);
-                let (token, _token_exp) = token_factory
-                    .issue(&claims.sub, vec![], apps, Some(exp), false, Some(remote_ip))?;
+                let (token, _token_exp) = token_factory.issue(
+                    &claims.sub,
+                    vec![],
+                    apps,
+                    Some(exp),
+                    false,
+                    Some(remote_ip),
+                )?;
                 sleeper.sleep().await;
                 Ok(Some(pack(token)?))
             }
@@ -569,8 +575,7 @@ impl RpcHandlers for MasterHandlers {
                 Ok(Some(pack(res)?))
             }
             "pk.present" => {
-                let (token_str, remote_ip): (Zeroizing<String>, IpAddr) =
-                    event.unpack_payload()?;
+                let (token_str, remote_ip): (Zeroizing<String>, IpAddr) = event.unpack_payload()?;
                 if self.context.passkey_factory.is_none() {
                     return Ok(Some(pack(None::<bool>)?));
                 }
@@ -580,8 +585,7 @@ impl RpcHandlers for MasterHandlers {
                 ))?))
             }
             "pk.delete" => {
-                let (token_str, remote_ip): (Zeroizing<String>, IpAddr) =
-                    event.unpack_payload()?;
+                let (token_str, remote_ip): (Zeroizing<String>, IpAddr) = event.unpack_payload()?;
                 let user = self.get_user(&token_str, remote_ip).await?;
                 self.context.storage.delete_passkey(&user).await?;
                 Ok(Some(pack(true)?))
@@ -615,11 +619,8 @@ impl RpcHandlers for MasterHandlers {
                 Ok(Some(pack(res)?))
             }
             "pk.fr" => {
-                let (token_str, reg, remote_ip): (
-                    String,
-                    RegisterPublicKeyCredential,
-                    IpAddr,
-                ) = event.unpack_payload()?;
+                let (token_str, reg, remote_ip): (String, RegisterPublicKeyCredential, IpAddr) =
+                    event.unpack_payload()?;
                 let user = self.get_user(&token_str, remote_ip).await?;
                 let Some(ref passkey_factory) = self.context.passkey_factory else {
                     return Err(RpcError::method(None));
@@ -649,12 +650,7 @@ impl RpcHandlers for MasterHandlers {
                     return Err(RpcError::method(None));
                 };
                 let tokens::ValidationResponse::Valid { claims, .. } = token_factory
-                    .validate(
-                        token_str,
-                        self.context.storage.as_ref(),
-                        false,
-                        remote_ip,
-                    )
+                    .validate(token_str, self.context.storage.as_ref(), false, remote_ip)
                     .await
                 else {
                     return Err(Error::access("Invalid token").into());

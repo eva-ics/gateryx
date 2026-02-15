@@ -219,7 +219,10 @@ impl Client {
         allow_app_tokens: bool,
         remote_ip: IpAddr,
     ) -> impl Future<Output = Result<tokens::ValidationResponse>> + 'a {
-        self.call(ApiMethod::ValidateToken, (token_str, allow_app_tokens, remote_ip))
+        self.call(
+            ApiMethod::ValidateToken,
+            (token_str, allow_app_tokens, remote_ip),
+        )
     }
     pub fn token_factory_public(&self) -> impl Future<Output = Result<Option<tokens::Public>>> {
         self.call(ApiMethod::TokenFactoryPublic, ())

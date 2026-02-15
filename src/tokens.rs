@@ -367,18 +367,17 @@ impl Factory {
             debug!(expected_iss = ?self.issuer_uri, token_iss = ?token.claims.iss, "Token issuer mismatch");
             return ValidationResponse::Invalid;
         }
-        if self.stick_to_ip {
-            if let Some(ref token_ip) = token.claims.ip {
-                if current_ip.to_string() != *token_ip {
-                    debug!(
-                        user = %token.claims.sub,
-                        token_ip = %token_ip,
-                        current_ip = %current_ip,
-                        "Token IP does not match request IP"
-                    );
-                    return ValidationResponse::Invalid;
-                }
-            }
+        if self.stick_to_ip
+            && let Some(ref token_ip) = token.claims.ip
+            && current_ip.to_string() != *token_ip
+        {
+            debug!(
+                user = %token.claims.sub,
+                token_ip = %token_ip,
+                current_ip = %current_ip,
+                "Token IP does not match request IP"
+            );
+            return ValidationResponse::Invalid;
         }
         // double check expiration
         if Timestamp::from_secs(token.claims.exp) < Timestamp::now() {
