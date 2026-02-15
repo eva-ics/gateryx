@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use http::{header::HeaderName, Response};
+use http::{Response, header::HeaderName};
 use http_body_util::combinators::BoxBody;
 use hyper::body::Bytes;
 use serde::Deserialize;
@@ -20,6 +20,7 @@ pub mod app_util;
 pub mod authenticator;
 mod bp;
 mod compress;
+pub mod eapi;
 mod error;
 mod gate;
 mod headers;
@@ -57,6 +58,8 @@ fn is_developent_mode() -> bool {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub auth: Option<authenticator::Config>,
+    #[serde(default)]
+    pub eapi: Option<eapi::Config>,
     #[serde(default)]
     pub listener: Vec<ListenerConfig>,
     pub server: ServerConfig,

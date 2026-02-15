@@ -75,3 +75,28 @@ div.eva.login.header {
 div.eva.login.container {
   height: 100vh;
 }
+
+.eva.login.otp-setup {
+  .eva.login.otp-setup-hint {
+    margin: 0 0 0.5em;
+    font-size: 0.9em;
+    color: $secondary-text-color;
+  }
+  .eva.login.otp-setup-qr {
+    display: inline-block;
+    padding: 10px;
+    margin-bottom: 0.75em;
+    background: #fff;
+    border-radius: 8px;
+    line-height: 0;
+  }
+  .eva.login.otp-secret {
+    display: block;
+    padding: 0.5em;
+    background: $cards-bg-color;
+    border: 1px solid $border-color;
+    border-radius: 4px;
+    word-break: break-all;
+    font-size: 0.85em;
+  }
+}

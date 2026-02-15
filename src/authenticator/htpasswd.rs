@@ -34,7 +34,7 @@ impl Authenticator for HtpasswdAuthenticator {
     async fn user_groups(&self, _login: &str) -> Result<Vec<String>> {
         Ok(vec![])
     }
-    async fn verify(&self, login: &str, password: &str) -> AuthResult {
+    async fn verify(&self, login: &str, password: &str, _otp: Option<&str>) -> AuthResult {
         let random_sleeper = RandomSleeper::new(100..300);
         match self.verify_password(login, password).await {
             Ok(v) => {
