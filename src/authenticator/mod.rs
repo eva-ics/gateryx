@@ -10,12 +10,18 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{ConfigCheckIssue, Error, Result, bp, passkeys, storage::Storage, tokens};
+use crate::{ConfigCheckIssue, Error, Result, bp, eapi, passkeys, storage::Storage, tokens};
 
 pub mod db;
 pub mod eva;
 pub mod htpasswd;
 pub mod ldap;
+
+/// Context from the master process passed to authenticators that need it (e.g. EVA).
+#[derive(Clone)]
+pub struct AuthMasterContext {
+    pub eapi_bus: Option<Arc<eapi::EAPIBus>>,
+}
 
 #[derive(Default, Deserialize, Clone)]
 pub struct UserAgentList(Vec<String>);
@@ -318,6 +324,7 @@ pub trait Authenticator: Send + Sync {
 pub async fn create_authenticator(
     config: &Config,
     db: Arc<dyn Storage>,
+    auth_master_ctx: Option<Arc<AuthMasterContext>>,
 ) -> Result<Box<dyn Authenticator>> {
     match &config.authenticator {
         AuthenticatorConfig::None => {
@@ -338,7 +345,12 @@ pub async fn create_authenticator(
             Ok(Box::new(auth))
         }
         AuthenticatorConfig::Eva(eva_config) => {
-            let auth = eva::EvaAuthenticator::new(eva_config);
+            let ctx = auth_master_ctx.ok_or_else(|| {
+                Error::failed(
+                    "Eva authenticator requires [eapi] section with bus connection in config",
+                )
+            })?;
+            let auth = eva::EvaAuthenticator::new(eva_config, ctx);
             Ok(Box::new(auth))
         }
     }

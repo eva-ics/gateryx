@@ -33,7 +33,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, is_developent_mode,
+    Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, eapi, is_developent_mode,
     logger::Logger,
     passkeys,
     storage::{self, Storage},
@@ -49,6 +49,7 @@ struct Context {
     apps: Vec<AdminAppView>,
     authenticator: Option<Box<dyn authenticator::Authenticator>>,
     bp: Option<Arc<bp::BreakinProtection>>,
+    eapi_bus: Option<Arc<eapi::EAPIBus>>,
     passkey_factory: Option<passkeys::Factory>,
     logger: Option<Mutex<Logger>>,
     meta_logger: Option<Mutex<Logger>>,
@@ -656,6 +657,7 @@ fn register_signals(active: Arc<AtomicBool>) {
     });
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_master_api_impl(
     fd: i32,
     child_pid: libc::pid_t,
@@ -676,6 +678,7 @@ async fn run_master_api_impl(
         apps,
         authenticator: None,
         bp: None,
+        eapi_bus: None,
         passkey_factory: None,
         logger: None,
         meta_logger: None,
@@ -689,9 +692,33 @@ async fn run_master_api_impl(
         let admin_auth = admin::Auth::init(admin_config).await?;
         context.admin_auth = Some(admin_auth);
     }
+    if let Some(ref eapi_config) = config.eapi {
+        match eapi::EAPIBus::connect(eapi_config).await {
+            Ok(bus) => {
+                context.eapi_bus = Some(bus);
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to connect to EAPI bus");
+                return Err(e);
+            }
+        }
+    }
     if let Some(ref auth_config) = config.auth {
+        let auth_master_ctx = if matches!(
+            auth_config.authenticator,
+            authenticator::AuthenticatorConfig::Eva(_)
+        ) {
+            context.eapi_bus.as_ref().map(|_| {
+                Arc::new(authenticator::AuthMasterContext {
+                    eapi_bus: context.eapi_bus.clone(),
+                })
+            })
+        } else {
+            None
+        };
         let authenticator =
-            authenticator::create_authenticator(auth_config, storage.clone()).await?;
+            authenticator::create_authenticator(auth_config, storage.clone(), auth_master_ctx)
+                .await?;
         authenticator.spawn_secure_workers().await?;
         context.authenticator.replace(authenticator);
         context.token_factory.replace(

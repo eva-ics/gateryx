@@ -2,71 +2,43 @@ use std::collections::HashMap;
 use std::{sync::Arc, time::Duration};
 
 use crate::{Error, Result, util::GDuration};
-use busrt::rpc::{Rpc as _, RpcClient};
+use busrt::rpc::Rpc as _;
 use mini_moka::sync::Cache;
 use serde::Deserialize;
 use serde_json::json;
-use tokio::sync::Mutex;
-use tracing::{error, info, trace};
+use tracing::{error, trace};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use super::{AuthResult, Authenticator};
+use super::{AuthMasterContext, AuthResult, Authenticator};
 
-fn default_eva_svc_id() -> String {
-    "gateryx".to_string()
-}
-
-#[derive(Deserialize, Zeroize, ZeroizeOnDrop, Clone)]
-pub struct EvaBusConfig {
-    path: String,
-}
-
-impl Default for EvaBusConfig {
-    fn default() -> Self {
-        Self {
-            path: "/opt/eva4/var/bus.ipc".to_string(),
-        }
-    }
-}
-
-#[derive(Deserialize, Zeroize, ZeroizeOnDrop, Clone)]
+#[derive(Default, Deserialize, Zeroize, ZeroizeOnDrop, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
-    #[serde(default = "default_eva_svc_id")]
-    id: String,
     auth_svcs: Vec<String>,
-    #[serde(default)]
-    bus: EvaBusConfig,
     #[zeroize(skip)]
-    #[serde(default = "crate::util::default_timeout")]
-    timeout: GDuration,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            id: default_eva_svc_id(),
-            auth_svcs: <_>::default(),
-            bus: EvaBusConfig::default(),
-            timeout: crate::util::default_timeout(),
-        }
-    }
+    #[serde(default)]
+    timeout: Option<GDuration>,
 }
 
 pub struct EvaAuthenticator {
     config: Config,
+    context: Arc<AuthMasterContext>,
     timeout: Duration,
-    bus_rpc_client: Mutex<Option<Arc<RpcClient>>>,
     // cache for user groups
     user_cache: parking_lot::Mutex<Cache<String, Vec<String>>>,
 }
 
 impl EvaAuthenticator {
-    pub fn new(config: &Config) -> Self {
-        let timeout = config.timeout.into();
+    pub fn new(config: &Config, context: Arc<AuthMasterContext>) -> Self {
+        let timeout = config
+            .timeout
+            .map(Duration::from)
+            .or_else(|| context.eapi_bus.as_ref().and_then(|b| b.timeout()))
+            .unwrap_or(crate::util::default_timeout().into());
         Self {
             config: config.clone(),
+            context,
             timeout,
-            bus_rpc_client: <_>::default(),
             user_cache: parking_lot::Mutex::new(
                 Cache::builder()
                     .max_capacity(16384)
@@ -75,30 +47,7 @@ impl EvaAuthenticator {
             ),
         }
     }
-    pub async fn rpc_client(&self) -> Result<Arc<RpcClient>> {
-        match self.get_rpc_client().await {
-            Ok(c) => Ok(c),
-            Err(e) => {
-                error!(error = ?e, "Failed to get EVA ICS bus RPC client");
-                Err(e)
-            }
-        }
-    }
-    async fn get_rpc_client(&self) -> Result<Arc<RpcClient>> {
-        let mut b = self.bus_rpc_client.lock().await;
-        if let Some(c) = &*b
-            && c.is_connected()
-        {
-            return Ok(c.clone());
-        }
-        let bus_config = busrt::ipc::Config::new(&self.config.bus.path, &self.config.id);
-        let bus =
-            tokio::time::timeout(self.timeout, busrt::ipc::Client::connect(&bus_config)).await??;
-        let rpc = Arc::new(busrt::rpc::RpcClient::new0(bus));
-        info!(bus_path = %self.config.bus.path, "Connected to EVA ICS bus");
-        *b = Some(rpc.clone());
-        Ok(rpc)
-    }
+
     pub async fn get_user_groups(
         &self,
         login: &str,
@@ -138,7 +87,12 @@ impl EvaAuthenticator {
             }}
         })
         .map_err(|e| Error::failed(format!("Failed to serialize payload: {e}")))?;
-        let rpc_client = self.rpc_client().await?;
+        let bus = self
+            .context
+            .eapi_bus
+            .as_ref()
+            .ok_or_else(|| Error::failed("EAPIBus not configured for Eva authenticator"))?;
+        let rpc_client = bus.rpc_client().await?;
         for svc in &self.config.auth_svcs {
             match rpc_client
                 .call(
@@ -162,7 +116,7 @@ impl EvaAuthenticator {
                     match std::str::from_utf8(e.data().unwrap_or_default()) {
                         Ok(s) => {
                             let mut sp = s.split('|');
-                            sp.next().unwrap();
+                            let _ = sp.next();
                             let kind = sp.next().unwrap_or_default();
                             if kind == "OTP" {
                                 trace!(service = svc, "Auth service requires OTP");
@@ -235,7 +189,7 @@ impl Authenticator for EvaAuthenticator {
                 AuthResult::Success { groups }
             }
             Err(Error::AccessDeniedMoreDataRequired(ref msg)) => {
-                let op = msg.split('|').nth(2).unwrap_or_default().trim();
+                let op = msg.split('|').nth(2).map_or("", str::trim);
                 if op == "REQ" {
                     AuthResult::OtpRequested
                 } else if op == "INVALID" {
