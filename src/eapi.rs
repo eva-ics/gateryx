@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use busrt::rpc::{Rpc as _, RpcClient};
+use eva_sdk::prelude::{AccountingEvent, ClientAccounting as _};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tokio::time::interval;
@@ -124,6 +125,40 @@ impl EAPIBus {
         tokio::time::timeout(timeout, self.inner.get_rpc_client())
             .await
             .map_err(|_| Error::Timeout)?
+    }
+
+    pub async fn report(&self, event: AccountingEvent<'_>) {
+        if let Err(e) = self.report_impl(event).await {
+            error!(error = %e, "Failed to report accounting event to EAPI");
+        }
+    }
+
+    async fn report_impl(&self, event: AccountingEvent<'_>) -> Result<()> {
+        let rpc_client = self.rpc_client().await?;
+        rpc_client.client().report(event).await.map_err(Error::io)
+    }
+
+    pub async fn call<T, R>(&self, target: &str, method: &str, params: Option<T>) -> Result<R>
+    where
+        T: serde::Serialize,
+        R: serde::de::DeserializeOwned,
+    {
+        let rpc = self.rpc_client().await?;
+        let payload = if let Some(p) = params {
+            busrt::borrow::Cow::Owned(rmp_serde::to_vec_named(&p).map_err(|e| {
+                Error::failed(format!("EAPI call parameter serialization failed: {e}"))
+            })?)
+        } else {
+            busrt::empty_payload!()
+        };
+        let rpc_res = rpc
+            .call(target, method, payload, busrt::QoS::No)
+            .await
+            .map_err(|e| Error::failed(format!("EAPI call to {target}.{method} failed: {e}")))?;
+        let res = rmp_serde::from_slice(rpc_res.payload()).map_err(|e| {
+            Error::failed(format!("EAPI call response deserialization failed: {e}"))
+        })?;
+        Ok(res)
     }
 }
 

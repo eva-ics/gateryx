@@ -21,6 +21,7 @@ use busrt::{
     broker::Broker,
     rpc::{RpcClient, RpcError, RpcEvent, RpcHandlers, RpcResult},
 };
+use eva_sdk::prelude::AccountingEvent;
 use serde::Deserialize;
 use serde_json::{Value, to_value};
 use tokio::{
@@ -61,14 +62,32 @@ struct Context {
 }
 
 impl Context {
-    fn report_auth_success(&self, ip_address: IpAddr, username: &str) {
+    async fn report_auth_success(&self, ip_address: IpAddr, username: &str) {
         if let Some(bp_engine) = &self.bp {
             bp_engine.report_success(ip_address, username);
         }
+        if let Some(eapi_bus) = &self.eapi_bus {
+            let ip_str = ip_address.to_string();
+            let ev = AccountingEvent::new()
+                .code(0)
+                .user(username)
+                .subj("login")
+                .src(&ip_str);
+            eapi_bus.report(ev).await;
+        }
     }
-    fn report_auth_failed(&self, ip_address: IpAddr, username: &str) {
+    async fn report_auth_failed(&self, ip_address: IpAddr, username: &str) {
         if let Some(bp_engine) = &self.bp {
             bp_engine.report_failure(ip_address, username);
+        }
+        if let Some(eapi_bus) = &self.eapi_bus {
+            let ip_str = ip_address.to_string();
+            let ev = AccountingEvent::new()
+                .code(eva_common::ERR_CODE_ACCESS_DENIED)
+                .user(username)
+                .subj("login")
+                .src(&ip_str);
+            eapi_bus.report(ev).await;
         }
     }
 }
@@ -138,7 +157,7 @@ impl MasterHandlers {
         } else {
             vec![]
         };
-        self.context.report_auth_success(remote_ip, &user);
+        self.context.report_auth_success(remote_ip, &user).await;
         let (token_str, exp) = token_factory.issue(&user, groups, vec![], None, false)?;
         Ok(AuthResponse::Success((token_str, user, exp)))
     }
@@ -178,12 +197,12 @@ impl MasterHandlers {
                 {
                     maybe_need_captcha!(true);
                 }
-                self.context.report_auth_success(remote_ip, &p.user);
+                self.context.report_auth_success(remote_ip, &p.user).await;
                 let (token_str, exp) = factory.issue(&p.user, groups, vec![], None, false)?;
                 Ok(AuthResponse::Success((token_str, p.user.clone(), exp)))
             }
             crate::authenticator::AuthResult::Failure => {
-                self.context.report_auth_failed(remote_ip, &p.user);
+                self.context.report_auth_failed(remote_ip, &p.user).await;
                 warn!(ip = %remote_ip, user = %p.user, "Failed login attempt");
                 maybe_need_captcha!(false);
                 Ok(AuthResponse::InvalidCredentials(None))
@@ -193,7 +212,7 @@ impl MasterHandlers {
                 Ok(AuthResponse::OtpSetup(secret))
             }
             crate::authenticator::AuthResult::OtpInvalid => {
-                self.context.report_auth_failed(remote_ip, &p.user);
+                self.context.report_auth_failed(remote_ip, &p.user).await;
                 Ok(AuthResponse::OtpInvalid)
             }
         }
