@@ -58,7 +58,7 @@ impl Authenticator for LdapAuthenticator {
         self.pool.start_connector().await;
         Ok(())
     }
-    async fn verify(&self, login: &str, password: &str) -> AuthResult {
+    async fn verify(&self, login: &str, password: &str, _otp: Option<&str>) -> AuthResult {
         let random_sleeper = RandomSleeper::new(100..300);
         match self.pool.verify_password(login, password).await {
             Ok(()) => {

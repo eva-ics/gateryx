@@ -7,7 +7,7 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::{Body, Incoming};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, to_value};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use zeroize::Zeroizing;
 
 use crate::{
@@ -334,6 +334,16 @@ where
                 id
             );
         }
+        Ok(AuthResponse::OtpRequested) => {
+            Err(Error::AccessDeniedMoreDataRequired("|OTP|REQ".to_string()))
+        }
+        Ok(AuthResponse::OtpSetup(secret)) => Err(Error::AccessDeniedMoreDataRequired(format!(
+            "|OTP|SETUP={}",
+            secret
+        ))),
+        Ok(AuthResponse::OtpInvalid) => Err(Error::AccessDeniedMoreDataRequired(
+            "|OTP|INVALID".to_string(),
+        )),
         Err(e) => {
             error!(ip = %remote_ip, error = %e, "Failed to authenticate user");
             synth_sleep().await;
@@ -627,7 +637,15 @@ pub(crate) async fn handle(
                 .await)
         }
         Err(e) => {
-            error!(ip = %remote_ip, method = %method, error = %e, "RPC method call failed");
+            if let Error::AccessDeniedMoreDataRequired(_) = &e {
+                debug!(
+                    ip = %remote_ip,
+                    method = %method,
+                    "RPC method call failed: AccessDeniedMoreDataRequired"
+                );
+            } else {
+                error!(ip = %remote_ip, method = %method, error = %e, "RPC method call failed");
+            }
             let response = RpcResponse::new_error(id, e);
             Ok(response.into_hyper_resonse(None).await)
         }

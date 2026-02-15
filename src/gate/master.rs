@@ -21,6 +21,7 @@ use busrt::{
     broker::Broker,
     rpc::{RpcClient, RpcError, RpcEvent, RpcHandlers, RpcResult},
 };
+use eva_sdk::prelude::AccountingEvent;
 use serde::Deserialize;
 use serde_json::{Value, to_value};
 use tokio::{
@@ -33,7 +34,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::{
-    Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, is_developent_mode,
+    Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, eapi, is_developent_mode,
     logger::Logger,
     passkeys,
     storage::{self, Storage},
@@ -49,6 +50,7 @@ struct Context {
     apps: Vec<AdminAppView>,
     authenticator: Option<Box<dyn authenticator::Authenticator>>,
     bp: Option<Arc<bp::BreakinProtection>>,
+    eapi_bus: Option<Arc<eapi::EAPIBus>>,
     passkey_factory: Option<passkeys::Factory>,
     logger: Option<Mutex<Logger>>,
     meta_logger: Option<Mutex<Logger>>,
@@ -60,14 +62,32 @@ struct Context {
 }
 
 impl Context {
-    fn report_auth_success(&self, ip_address: IpAddr, username: &str) {
+    async fn report_auth_success(&self, ip_address: IpAddr, username: &str) {
         if let Some(bp_engine) = &self.bp {
             bp_engine.report_success(ip_address, username);
         }
+        if let Some(eapi_bus) = &self.eapi_bus {
+            let ip_str = ip_address.to_string();
+            let ev = AccountingEvent::new()
+                .code(0)
+                .user(username)
+                .subj("login")
+                .src(&ip_str);
+            eapi_bus.report(ev).await;
+        }
     }
-    fn report_auth_failed(&self, ip_address: IpAddr, username: &str) {
+    async fn report_auth_failed(&self, ip_address: IpAddr, username: &str) {
         if let Some(bp_engine) = &self.bp {
             bp_engine.report_failure(ip_address, username);
+        }
+        if let Some(eapi_bus) = &self.eapi_bus {
+            let ip_str = ip_address.to_string();
+            let ev = AccountingEvent::new()
+                .code(eva_common::ERR_CODE_ACCESS_DENIED)
+                .user(username)
+                .subj("login")
+                .src(&ip_str);
+            eapi_bus.report(ev).await;
         }
     }
 }
@@ -137,7 +157,7 @@ impl MasterHandlers {
         } else {
             vec![]
         };
-        self.context.report_auth_success(remote_ip, &user);
+        self.context.report_auth_success(remote_ip, &user).await;
         let (token_str, exp) = token_factory.issue(&user, groups, vec![], None, false)?;
         Ok(AuthResponse::Success((token_str, user, exp)))
     }
@@ -163,24 +183,37 @@ impl MasterHandlers {
         let Some(ref auth) = self.context.authenticator else {
             return Ok(AuthResponse::AuthNotEnabled);
         };
-        match auth.verify(&p.user, &p.password).await {
+        match auth
+            .verify(&p.user, &p.password, p.otp.as_ref().map(|z| z.as_str()))
+            .await
+        {
             crate::authenticator::AuthResult::Success { groups } => {
-                if !self.verify_captcha(
-                    p.captcha_id.as_deref(),
-                    p.captcha_str.as_deref(),
-                    remote_ip,
-                )? {
+                if p.otp.is_none()
+                    && !self.verify_captcha(
+                        p.captcha_id.as_deref(),
+                        p.captcha_str.as_deref(),
+                        remote_ip,
+                    )?
+                {
                     maybe_need_captcha!(true);
                 }
-                self.context.report_auth_success(remote_ip, &p.user);
+                self.context.report_auth_success(remote_ip, &p.user).await;
                 let (token_str, exp) = factory.issue(&p.user, groups, vec![], None, false)?;
                 Ok(AuthResponse::Success((token_str, p.user.clone(), exp)))
             }
             crate::authenticator::AuthResult::Failure => {
-                self.context.report_auth_failed(remote_ip, &p.user);
+                self.context.report_auth_failed(remote_ip, &p.user).await;
                 warn!(ip = %remote_ip, user = %p.user, "Failed login attempt");
                 maybe_need_captcha!(false);
                 Ok(AuthResponse::InvalidCredentials(None))
+            }
+            crate::authenticator::AuthResult::OtpRequested => Ok(AuthResponse::OtpRequested),
+            crate::authenticator::AuthResult::OtpSetup { secret } => {
+                Ok(AuthResponse::OtpSetup(secret))
+            }
+            crate::authenticator::AuthResult::OtpInvalid => {
+                self.context.report_auth_failed(remote_ip, &p.user).await;
+                Ok(AuthResponse::OtpInvalid)
             }
         }
     }
@@ -643,6 +676,7 @@ fn register_signals(active: Arc<AtomicBool>) {
     });
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_master_api_impl(
     fd: i32,
     child_pid: libc::pid_t,
@@ -663,6 +697,7 @@ async fn run_master_api_impl(
         apps,
         authenticator: None,
         bp: None,
+        eapi_bus: None,
         passkey_factory: None,
         logger: None,
         meta_logger: None,
@@ -676,9 +711,33 @@ async fn run_master_api_impl(
         let admin_auth = admin::Auth::init(admin_config).await?;
         context.admin_auth = Some(admin_auth);
     }
+    if let Some(ref eapi_config) = config.eapi {
+        match eapi::EAPIBus::connect(eapi_config).await {
+            Ok(bus) => {
+                context.eapi_bus = Some(bus);
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to connect to EAPI bus");
+                return Err(e);
+            }
+        }
+    }
     if let Some(ref auth_config) = config.auth {
+        let auth_master_ctx = if matches!(
+            auth_config.authenticator,
+            authenticator::AuthenticatorConfig::Eva(_)
+        ) {
+            context.eapi_bus.as_ref().map(|_| {
+                Arc::new(authenticator::AuthMasterContext {
+                    eapi_bus: context.eapi_bus.clone(),
+                })
+            })
+        } else {
+            None
+        };
         let authenticator =
-            authenticator::create_authenticator(auth_config, storage.clone()).await?;
+            authenticator::create_authenticator(auth_config, storage.clone(), auth_master_ctx)
+                .await?;
         authenticator.spawn_secure_workers().await?;
         context.authenticator.replace(authenticator);
         context.token_factory.replace(

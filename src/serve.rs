@@ -119,6 +119,12 @@ impl ServeApp {
             ServeApp::VirtualApp(_) => false,
         }
     }
+    fn gateryx_api_enabled(&self) -> bool {
+        match self {
+            ServeApp::App(app) => app.gateryx_api,
+            ServeApp::VirtualApp(_) => true,
+        }
+    }
     fn use_auth(&self) -> bool {
         match self {
             ServeApp::App(app) => app.use_auth,
@@ -141,12 +147,6 @@ impl ServeApp {
         match self {
             ServeApp::App(app) => &app.allow_groups,
             ServeApp::VirtualApp(_) => &[],
-        }
-    }
-    fn api_allowed(&self) -> bool {
-        match self {
-            ServeApp::App(app) => app.gateryx_api,
-            ServeApp::VirtualApp(_) => true,
         }
     }
     async fn resolve_force(context: &Context, app_name: &str) -> Option<Self> {
@@ -433,8 +433,7 @@ async fn handle_http_request(
     if request.uri().path() == "/robots.txt" {
         return Ok(deny_robots().await);
     }
-
-    if app.api_allowed() {
+    if app.gateryx_api_enabled() {
         if request.uri().path() == URI_RPC {
             if request.method() != Method::POST {
                 return Ok(http_response(405, "Method Not Allowed").await);

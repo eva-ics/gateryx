@@ -40,6 +40,23 @@ authenticator = { kind = "db", params = { policy = { min_length = 6, require_upp
 # warning: for generic LDAP servers the authenticator does not check if the user account is disabled or locked
 #authenticator = { kind = "ldap", params = { path = "ou=users,dc=domain,dc=com", service_user = "service", service_password = "secret", url = "ldap://somehost:389", provider = "msad" } }
 
+# EVA ICS authenticator (requires [eapi] section)
+#
+# * auth_svcs - list of authentication services to use, required
+# * timeout - optional; overrides [eapi] timeout for this authenticator
+#
+#authenticator = { kind = "eva", params = { auth_svcs = ["eva.aaa.localauth"], timeout = 5 } }
+
+# EAPI (EVA ICS bus) connection
+#
+# * id - bus client ID (default: gateryx)
+# * timeout - default timeout for bus operations
+# * bus/path - bus socket path (default: /opt/eva4/var/bus.ipc)
+#[eapi]
+#id = "gateryx"
+#timeout = 5
+#bus = { path = "/opt/eva4/var/bus.ipc" }
+
 # Breakin protection configuration
 #
 # * max_records - maximum number of remote clients to track

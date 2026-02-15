@@ -64,11 +64,11 @@ pub struct Config {
     #[serde(default = "crate::util::default_true")]
     pub use_auth: bool,
     #[serde(default)]
+    pub gateryx_api: bool,
+    #[serde(default)]
     pub hidden: bool,
     #[serde(default)]
     pub skip_remote_tls_verify: bool,
-    #[serde(default)]
-    pub gateryx_api: bool,
     #[zeroize(skip)]
     pub websocket: Option<crate::ws::Config>,
     #[zeroize(skip)]

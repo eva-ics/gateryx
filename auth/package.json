@@ -12,6 +12,7 @@
   "dependencies": {
     "@simplewebauthn/browser": "^13.2.2",
     "bmat": "^0.1.32",
+    "qrcode.react": "^4.2.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "sass": "^1.93.2"

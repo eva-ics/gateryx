@@ -10,11 +10,18 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{ConfigCheckIssue, Error, Result, bp, passkeys, storage::Storage, tokens};
+use crate::{ConfigCheckIssue, Error, Result, bp, eapi, passkeys, storage::Storage, tokens};
 
 pub mod db;
+pub mod eva;
 pub mod htpasswd;
 pub mod ldap;
+
+/// Context from the master process passed to authenticators that need it (e.g. EVA).
+#[derive(Clone)]
+pub struct AuthMasterContext {
+    pub eapi_bus: Option<Arc<eapi::EAPIBus>>,
+}
 
 #[derive(Default, Deserialize, Clone)]
 pub struct UserAgentList(Vec<String>);
@@ -161,7 +168,7 @@ impl Authenticator for DummyAuthenticator {
     async fn present(&self, _login: &str) -> bool {
         false
     }
-    async fn verify(&self, _login: &str, _password: &str) -> AuthResult {
+    async fn verify(&self, _login: &str, _password: &str, _otp: Option<&str>) -> AuthResult {
         AuthResult::Failure
     }
     async fn user_groups(&self, _login: &str) -> Result<Vec<String>> {
@@ -183,13 +190,16 @@ pub enum AuthenticatorConfig {
         policy: Option<PasswordPolicy>,
     },
     Ldap(ldap::Config),
+    Eva(eva::Config),
 }
 
 impl AuthenticatorConfig {
     pub fn check(&self, work_dir: &Path) -> Vec<ConfigCheckIssue> {
         let mut issues = Vec::new();
         match self {
-            AuthenticatorConfig::None | AuthenticatorConfig::Db { .. } => {}
+            AuthenticatorConfig::None
+            | AuthenticatorConfig::Db { .. }
+            | AuthenticatorConfig::Eva { .. } => {}
             AuthenticatorConfig::Htpasswd { path } => {
                 let full_path = if path.is_absolute() {
                     path.clone()
@@ -226,7 +236,9 @@ impl AuthenticatorConfig {
 impl AuthenticatorConfig {
     pub fn canonicalize_path(&mut self, work_dir: &Path) {
         match self {
-            AuthenticatorConfig::None | AuthenticatorConfig::Db { .. } => {}
+            AuthenticatorConfig::None
+            | AuthenticatorConfig::Db { .. }
+            | AuthenticatorConfig::Eva { .. } => {}
             AuthenticatorConfig::Htpasswd { path } => {
                 if !path.is_absolute() {
                     *path = work_dir.join(&*path);
@@ -244,15 +256,25 @@ impl AuthenticatorConfig {
 }
 
 pub enum AuthResult {
-    Success { groups: Vec<String> },
+    Success {
+        groups: Vec<String>,
+    },
     Failure,
+    /// User must enter OTP code (no setup needed).
+    OtpRequested,
+    /// User must set up TOTP (show secret/QR) then enter code.
+    OtpSetup {
+        secret: String,
+    },
+    /// OTP was wrong; password was correct.
+    OtpInvalid,
 }
 
 #[async_trait::async_trait]
 pub trait Authenticator: Send + Sync {
     async fn present(&self, login: &str) -> bool;
     async fn user_groups(&self, login: &str) -> Result<Vec<String>>;
-    async fn verify(&self, login: &str, password: &str) -> AuthResult;
+    async fn verify(&self, login: &str, password: &str, otp: Option<&str>) -> AuthResult;
     async fn add(&self, _login: &str, _password: &str) -> Result<()> {
         Err(Error::NotImplemented)
     }
@@ -272,7 +294,7 @@ pub trait Authenticator: Send + Sync {
         new_password: &str,
     ) -> Result<()> {
         if !matches!(
-            self.verify(login, old_password).await,
+            self.verify(login, old_password, None).await,
             AuthResult::Success { .. }
         ) {
             return Err(Error::failed("authentication failed"));
@@ -302,6 +324,7 @@ pub trait Authenticator: Send + Sync {
 pub async fn create_authenticator(
     config: &Config,
     db: Arc<dyn Storage>,
+    auth_master_ctx: Option<Arc<AuthMasterContext>>,
 ) -> Result<Box<dyn Authenticator>> {
     match &config.authenticator {
         AuthenticatorConfig::None => {
@@ -319,6 +342,15 @@ pub async fn create_authenticator(
         }
         AuthenticatorConfig::Ldap(ldap_config) => {
             let auth = ldap::LdapAuthenticator::create(ldap_config).await?;
+            Ok(Box::new(auth))
+        }
+        AuthenticatorConfig::Eva(eva_config) => {
+            let ctx = auth_master_ctx.ok_or_else(|| {
+                Error::failed(
+                    "Eva authenticator requires [eapi] section with bus connection in config",
+                )
+            })?;
+            let auth = eva::EvaAuthenticator::new(eva_config, ctx);
             Ok(Box::new(auth))
         }
     }
