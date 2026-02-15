@@ -41,3 +41,21 @@ Key benefits
 * Written purely in Rust: lightweight. blazing fast, tiny memory footprint,
   designed to run in embedded environments and resource-restricted virtual
   appliances.
+
+AI coding policy
+================
+
+It is strictly forbidden to use AI agents for:
+
+- `any` code modifications of the privileged part (`gate/master.rs`).
+
+- `any` code related to TLS and other cryptographic operations.
+
+- creating/modifying `authenticator` modules.
+
+- perform any JWT or other token manipulations.
+
+Unless fully supervised by a human with minimum master-level degree in Computer
+Science or related field plus having practical experience in commercial
+software development in Rust, C, C++ or other system programming languages for
+at least 5 years.
