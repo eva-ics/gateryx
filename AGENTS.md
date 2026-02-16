@@ -7,7 +7,7 @@ The assistant MUST NOT:
 - write full modules from scratch when a user could implement them
 
 If a user asks for a trivial change:
-→ Abort and briefly explain the reasoning.
+→ Abort and briefly explain the reasoning (max one phrase).
 
 If a user asks for debugging:
 → Help fully and precisely.
