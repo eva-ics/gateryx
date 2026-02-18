@@ -92,12 +92,11 @@ pub struct EAPIBus {
 
 impl EAPIBus {
     /// Connect to the EVA ICS bus and create an EAPIBus; spawns a verification worker.
-    pub async fn connect(config: &Config) -> Result<Arc<Self>> {
+    pub fn new(config: &Config) -> Arc<Self> {
         let inner = Arc::new(EAPIBusInner {
             client: Mutex::new(None),
             config: config.clone(),
         });
-        inner.get_rpc_client().await?;
         let inner_for_worker = Arc::clone(&inner);
         let worker_handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_secs(10));
@@ -108,10 +107,10 @@ impl EAPIBus {
                 }
             }
         });
-        Ok(Arc::new(Self {
+        Arc::new(Self {
             inner,
             worker_handle: Some(worker_handle),
-        }))
+        })
     }
 
     /// Returns the default timeout for bus operations, if configured.

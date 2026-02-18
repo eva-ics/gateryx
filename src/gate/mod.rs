@@ -90,6 +90,7 @@ pub enum AuthResponse {
     Success((String, String, u64)),
     AuthNotEnabled,
     InvalidCredentials(Option<String>),
+    Error,
     CaptchaRequired(String),
     OtpRequested,
     OtpSetup(String),

@@ -260,6 +260,7 @@ pub enum AuthResult {
         groups: Vec<String>,
     },
     Failure,
+    Error,
     /// User must enter OTP code (no setup needed).
     OtpRequested,
     /// User must set up TOTP (show secret/QR) then enter code.

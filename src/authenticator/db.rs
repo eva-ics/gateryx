@@ -47,19 +47,22 @@ impl DbAuth {
                     Ok(h) => h,
                     Err(e) => {
                         error!(%e, "error parsing password hash from database");
-                        return AuthResult::Failure;
+                        return AuthResult::Error;
                     }
                 };
                 if Pbkdf2
                     .verify_password(password.as_bytes(), &parsed_hash)
                     .is_ok()
                 {
-                    self.storage.touch_user(login).await.ok();
+                    if let Err(e) = self.storage.touch_user(login).await {
+                        error!(%e, "error updating last login");
+                        return AuthResult::Error;
+                    }
                     let groups = match self.storage.user_groups(login).await {
                         Ok(gs) => gs,
                         Err(e) => {
                             error!(%e, "error retrieving user groups from database");
-                            return AuthResult::Failure;
+                            return AuthResult::Error;
                         }
                     };
                     AuthResult::Success { groups }
@@ -70,7 +73,7 @@ impl DbAuth {
             Ok(None) => AuthResult::Failure,
             Err(e) => {
                 error!(%e, "error looking up user in database");
-                AuthResult::Failure
+                AuthResult::Error
             }
         }
     }
@@ -103,6 +106,7 @@ impl Authenticator for DbAuth {
                 synth_sleep().await;
                 AuthResult::Failure
             }
+            AuthResult::Error => AuthResult::Error,
         }
     }
     async fn user_groups(&self, login: &str) -> Result<Vec<String>> {
@@ -135,6 +139,7 @@ impl Authenticator for DbAuth {
             | AuthResult::OtpRequested
             | AuthResult::OtpSetup { .. }
             | AuthResult::OtpInvalid => Err(Error::failed("authentication failed")),
+            AuthResult::Error => Err(Error::failed("Server error")),
         }
     }
     async fn list(&self) -> Result<Vec<UserInfo>> {

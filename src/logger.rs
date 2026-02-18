@@ -161,7 +161,9 @@ impl From<LogRecord> for SafeLogRecord {
             status: r.status,
             size: r.size,
             referer: r.referer.map(|s| truncate_str(&s, MAX_URI_REFERER_UA_LEN)),
-            user_agent: r.user_agent.map(|s| truncate_str(&s, MAX_URI_REFERER_UA_LEN)),
+            user_agent: r
+                .user_agent
+                .map(|s| truncate_str(&s, MAX_URI_REFERER_UA_LEN)),
         }
     }
 }

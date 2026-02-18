@@ -93,6 +93,9 @@ impl EvaAuthenticator {
             .as_ref()
             .ok_or_else(|| Error::failed("EAPIBus not configured for Eva authenticator"))?;
         let rpc_client = bus.rpc_client().await?;
+        if !rpc_client.is_connected() {
+            return Err(Error::failed("EAPI RPC client is not connected"));
+        }
         for svc in &self.config.auth_svcs {
             match rpc_client
                 .call(
@@ -155,7 +158,7 @@ impl EvaAuthenticator {
                 }
             }
         }
-        Err(Error::access("Failed to get user groups"))
+        Err(Error::AccessDenied(String::new()))
     }
 }
 
@@ -200,12 +203,13 @@ impl Authenticator for EvaAuthenticator {
                     }
                 } else {
                     trace!(op = %op, "Unrecognized OTP op from auth service");
-                    AuthResult::Failure
+                    AuthResult::Error
                 }
             }
+            Err(Error::AccessDenied(_)) => AuthResult::Failure,
             Err(e) => {
                 error!(error = ?e, "Failed to get user groups");
-                AuthResult::Failure
+                AuthResult::Error
             }
         }
     }

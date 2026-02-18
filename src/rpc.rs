@@ -322,6 +322,11 @@ where
             }
             Err(Error::access("Invalid username or password"))
         }
+        Ok(AuthResponse::Error) => {
+            error!(ip = %remote_ip, "Authentication internal error");
+            synth_sleep().await;
+            Err(Error::failed("Server error"))
+        }
         Ok(AuthResponse::CaptchaRequired(id)) => {
             synth_sleep().await;
             warn!(ip = %remote_ip, user = %p.map(AuthPayload::user).unwrap_or_default(), "Login attempt requiring CAPTCHA");

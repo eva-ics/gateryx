@@ -35,7 +35,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, eapi, is_development_mode,
-    logger::{SafeLogRecord, Logger},
+    logger::{Logger, SafeLogRecord},
     passkeys,
     storage::{self, Storage},
     tokens::{self, ClaimsView},
@@ -208,6 +208,10 @@ impl MasterHandlers {
                 warn!(ip = %remote_ip, user = %p.user, "Failed login attempt");
                 maybe_need_captcha!(false);
                 Ok(AuthResponse::InvalidCredentials(None))
+            }
+            crate::authenticator::AuthResult::Error => {
+                error!(ip = %remote_ip, user = %p.user, "Authentication internal error");
+                Ok(AuthResponse::Error)
             }
             crate::authenticator::AuthResult::OtpRequested => Ok(AuthResponse::OtpRequested),
             crate::authenticator::AuthResult::OtpSetup { secret } => {
@@ -746,15 +750,7 @@ async fn run_master_api_impl(
         context.admin_auth = Some(admin_auth);
     }
     if let Some(ref eapi_config) = config.eapi {
-        match eapi::EAPIBus::connect(eapi_config).await {
-            Ok(bus) => {
-                context.eapi_bus = Some(bus);
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to connect to EAPI bus");
-                return Err(e);
-            }
-        }
+        context.eapi_bus = Some(eapi::EAPIBus::new(eapi_config));
     }
     if let Some(ref auth_config) = config.auth {
         let auth_master_ctx = if matches!(

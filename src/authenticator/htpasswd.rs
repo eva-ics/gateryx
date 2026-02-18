@@ -10,7 +10,6 @@ use tracing::{error, info, trace};
 use super::{AuthResult, Authenticator};
 use crate::Result;
 use crate::authenticator::RandomSleeper;
-use crate::util::synth_sleep;
 
 pub struct HtpasswdAuthenticator {
     inner: Arc<Mutex<HtpasswdAuthenticatorInner>>,
@@ -42,10 +41,8 @@ impl Authenticator for HtpasswdAuthenticator {
                 v
             }
             Err(e) => {
-                random_sleeper.sleep().await;
-                synth_sleep().await;
                 error!(%e, "error verifying password");
-                AuthResult::Failure
+                AuthResult::Error
             }
         }
     }

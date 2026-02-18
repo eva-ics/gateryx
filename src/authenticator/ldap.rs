@@ -67,16 +67,20 @@ impl Authenticator for LdapAuthenticator {
                     Ok(g) => g,
                     Err(e) => {
                         error!(%e, "error fetching user groups");
-                        return AuthResult::Failure;
+                        return AuthResult::Error;
                     }
                 };
                 AuthResult::Success { groups }
             }
             Err(e) => {
-                random_sleeper.sleep().await;
-                synth_sleep().await;
-                error!(%e, "error verifying password");
-                AuthResult::Failure
+                if matches!(e, crate::Error::AccessDenied(_)) {
+                    random_sleeper.sleep().await;
+                    synth_sleep().await;
+                    AuthResult::Failure
+                } else {
+                    error!(%e, "error verifying password");
+                    AuthResult::Error
+                }
             }
         }
     }

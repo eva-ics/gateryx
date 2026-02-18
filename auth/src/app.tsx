@@ -110,7 +110,10 @@ export const App = () => {
         </>
       );
     default:
-      let error_msg = app_state.err?.message;
+      const err = app_state.err;
+      const error_msg =
+        err?.message ??
+        (err?.code === -32010 ? "Server error" : undefined);
       return (
         <>
           <CredsForm
