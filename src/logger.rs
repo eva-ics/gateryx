@@ -4,9 +4,25 @@ use std::{net::IpAddr, path::Path};
 
 use http::{Method, Request, Uri, Version};
 use hyper::body::Incoming;
+use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt as _;
 use tracing::error;
+
+const MAX_STRING_LEN: usize = 100;
+const MAX_URI_REFERER_UA_LEN: usize = 512;
+const MAX_LOG_RECORD_PAYLOAD_SIZE: usize = 4096;
+
+fn truncate_str(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -56,6 +72,7 @@ const LOGGER_CHANNEL_SIZE: usize = 1024;
 pub type LogSender = async_channel::Sender<LogRecord>;
 pub type MetaLogSender = async_channel::Sender<RequestMeta>;
 
+#[derive(Debug)]
 pub struct LogRecord {
     ip: IpAddr,
     user: Option<String>,
@@ -116,7 +133,40 @@ impl LogRecord {
     }
 }
 
-impl fmt::Display for LogRecord {
+#[derive(Serialize, Deserialize)]
+pub struct SafeLogRecord {
+    ip: String,
+    user: Option<String>,
+    method: String,
+    tls: bool,
+    host: String,
+    uri: String,
+    version: String,
+    status: u16,
+    size: usize,
+    referer: Option<String>,
+    user_agent: Option<String>,
+}
+
+impl From<LogRecord> for SafeLogRecord {
+    fn from(r: LogRecord) -> Self {
+        Self {
+            ip: r.ip.to_string(),
+            user: r.user.map(|u| truncate_str(&u, MAX_STRING_LEN)),
+            method: r.method.as_str().to_string(),
+            tls: r.tls,
+            host: truncate_str(&r.host, MAX_STRING_LEN),
+            uri: truncate_str(&r.uri.to_string(), MAX_URI_REFERER_UA_LEN),
+            version: format!("{:?}", r.version),
+            status: r.status,
+            size: r.size,
+            referer: r.referer.map(|s| truncate_str(&s, MAX_URI_REFERER_UA_LEN)),
+            user_agent: r.user_agent.map(|s| truncate_str(&s, MAX_URI_REFERER_UA_LEN)),
+        }
+    }
+}
+
+impl fmt::Display for SafeLogRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let url = if self.tls {
             format!("https://{}{}", self.host, self.uri)
@@ -125,7 +175,7 @@ impl fmt::Display for LogRecord {
         };
         write!(
             f,
-            "{} - {} [{}] \"{} {} {:?}\" {} {} \"{}\" \"{}\"",
+            "{} - {} [{}] \"{} {} {}\" {} {} \"{}\" \"{}\"",
             self.ip,
             self.user.as_deref().unwrap_or("-"),
             chrono::Local::now().format("%d/%b/%Y:%H:%M:%S %z"),
@@ -218,14 +268,22 @@ impl Logger {
 }
 
 pub fn spawn(master_client: gate::worker::Client) -> LogSender {
-    const MAX_LOG_RECORD_SIZE: usize = 4096;
     let (tx, rx) = async_channel::bounded::<LogRecord>(LOGGER_CHANNEL_SIZE);
     tokio::spawn(async move {
         while let Ok(record) = rx.recv().await {
-            let mut buf = record.to_string().into_bytes();
-            if buf.len() > MAX_LOG_RECORD_SIZE {
-                buf.truncate(MAX_LOG_RECORD_SIZE);
+            let payload = SafeLogRecord::from(record);
+            let buf = match serde_json::to_vec(&payload) {
+                Ok(b) => b,
+                Err(e) => {
+                    error!(error = %e, "Failed to serialize log record");
+                    continue;
+                }
+            };
+            if buf.len() > MAX_LOG_RECORD_PAYLOAD_SIZE {
+                error!("Log record payload too large, omitting");
+                continue;
             }
+            let mut buf = buf;
             buf.push(b'\n');
             if let Err(e) = master_client.write_log_record(&buf).await {
                 error!(error = %e, "Failed to send log record");
@@ -258,4 +316,56 @@ pub fn spawn_meta(master_client: gate::worker::Client) -> MetaLogSender {
         }
     });
     tx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_log_record_to_string_canonical_combined_log_format() {
+        let r = SafeLogRecord {
+            ip: "192.0.2.1".to_string(),
+            user: Some("alice".to_string()),
+            method: "GET".to_string(),
+            tls: false,
+            host: "example.com".to_string(),
+            uri: "/path?q=1".to_string(),
+            version: "HTTP/1.1".to_string(),
+            status: 200,
+            size: 1234,
+            referer: Some("https://ref.example/".to_string()),
+            user_agent: Some("Mozilla/5.0".to_string()),
+        };
+        let line = r.to_string();
+        // Combined log format: IP - user [date] "METHOD URL VERSION" status size "referer" "user_agent"
+        assert!(line.starts_with("192.0.2.1 - alice ["));
+        let rest = line.strip_prefix("192.0.2.1 - alice [").unwrap();
+        let (timestamp, tail) = rest.split_once("] ").expect("timestamp segment");
+        assert!(timestamp.len() >= 20, "timestamp DD/Mon/YYYY:HH:MM:SS %z");
+        assert_eq!(
+            tail,
+            "\"GET http://example.com/path?q=1 HTTP/1.1\" 200 1234 \"https://ref.example/\" \"Mozilla/5.0\""
+        );
+    }
+
+    #[test]
+    fn safe_log_record_to_string_dash_for_missing_user_referer_ua() {
+        let r = SafeLogRecord {
+            ip: "10.0.0.1".to_string(),
+            user: None,
+            method: "POST".to_string(),
+            tls: true,
+            host: "secure.example.com".to_string(),
+            uri: "/".to_string(),
+            version: "HTTP/2".to_string(),
+            status: 201,
+            size: 0,
+            referer: None,
+            user_agent: None,
+        };
+        let line = r.to_string();
+        assert!(line.starts_with("10.0.0.1 - - ["));
+        assert!(line.ends_with("] \"POST https://secure.example.com/ HTTP/2\" 201 0 \"-\" \"-\""));
+    }
 }

@@ -816,7 +816,7 @@ async fn handle_stream<S>(
                         if let Some(sub) = token_sub {
                             log_record.set_user(sub);
                         }
-                        debug!("{}", log_record);
+                        debug!("{:?}", log_record);
                         context
                             .http_logger
                             .as_ref()

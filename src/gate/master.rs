@@ -35,7 +35,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     Config, DEVELOPER_USER, Error, VAppMap, admin, authenticator, bp, eapi, is_development_mode,
-    logger::Logger,
+    logger::{SafeLogRecord, Logger},
     passkeys,
     storage::{self, Storage},
     tokens::{self, ClaimsView},
@@ -470,10 +470,19 @@ impl RpcHandlers for MasterHandlers {
                     return Err(RpcError::internal(None));
                 };
                 let payload = event.payload();
+                let payload = payload.strip_suffix(b"\n").unwrap_or(payload);
+                let record: SafeLogRecord = match super::unpack(payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        error!(error = %e, "Failed to deserialize log record");
+                        return Ok(None);
+                    }
+                };
+                let line = format!("{}\n", record);
                 logger
                     .lock()
                     .await
-                    .write(payload)
+                    .write(line.as_bytes())
                     .await
                     .map_err(|_| RpcError::internal(None))?;
                 Ok(None)
