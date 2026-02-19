@@ -1794,7 +1794,7 @@ dependencies = [
 
 [[package]]
 name = "gateryx"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
