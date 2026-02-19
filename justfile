@@ -37,7 +37,10 @@ system-web:
 
 pub-lab: build-x86_64-unknown-linux-gnu copy-lab
 
-release: deb-amd64 deb-arm64 pub-deb pub-docker
+release: deb-amd64 deb-arm64 pub-deb pub-docker publish-cargo-crate tag
+
+publish-cargo-crate:
+  cargo publish
 
 prepare-docker:
     docker buildx create \
