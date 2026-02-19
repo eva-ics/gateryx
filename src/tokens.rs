@@ -18,8 +18,14 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use p256::{PublicKey, ecdsa::SigningKey, elliptic_curve::JwkEcKey};
 use pkcs8::{DecodePrivateKey as _, EncodePrivateKey as _, EncodePublicKey as _};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use tracing::{debug, error, info, warn};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
+fn ip_hash(ip: &IpAddr) -> String {
+    BASE64_STANDARD.encode(Sha256::digest(ip.to_string().as_bytes()))
+}
 
 pub const TOKEN_COOKIE_NAME_PREFIX: &str = "gateryx_auth_";
 pub const DEFAULT_TOKEN_COOKIE_NAME: &str = "token";
@@ -47,7 +53,7 @@ pub struct Config {
     pub domain: Option<String>,
     #[serde(default = "default_token_cookie_name")]
     pub cookie: String,
-    /// When true, JWTs include the client IP and are only accepted when the request IP matches.
+    /// When true, JWTs include a hash of the client IP and are only accepted when the request IP matches.
     #[serde(default)]
     pub stick_to_ip: bool,
 }
@@ -87,9 +93,8 @@ pub struct Claims {
     pub apps: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<String>,
-    /// Client IP at issue time when stick_to_ip is enabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ip: Option<String>,
+    pub iphash: Option<String>,
 }
 
 impl Claims {
@@ -322,8 +327,8 @@ impl Factory {
             }
         }
         let exp = Timestamp::now().as_secs() + exp.unwrap_or(self.expiration_seconds);
-        let ip = if self.stick_to_ip {
-            remote_ip.map(|a| a.to_string())
+        let iphash = if self.stick_to_ip {
+            remote_ip.map(|a| ip_hash(&a))
         } else {
             None
         };
@@ -335,7 +340,7 @@ impl Factory {
             jti: uuid::Uuid::new_v4().to_string(),
             apps,
             groups,
-            ip,
+            iphash,
         };
         let token = jsonwebtoken::encode(
             &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256),
@@ -367,17 +372,24 @@ impl Factory {
             debug!(expected_iss = ?self.issuer_uri, token_iss = ?token.claims.iss, "Token issuer mismatch");
             return ValidationResponse::Invalid;
         }
-        if self.stick_to_ip
-            && let Some(ref token_ip) = token.claims.ip
-            && current_ip.to_string() != *token_ip
-        {
-            debug!(
-                user = %token.claims.sub,
-                token_ip = %token_ip,
-                current_ip = %current_ip,
-                "Token IP does not match request IP"
-            );
-            return ValidationResponse::Invalid;
+        if self.stick_to_ip {
+            let Some(ref token_iphash_b64) = token.claims.iphash else {
+                debug!(user = %token.claims.sub, "Token missing iphash (stick_to_ip)");
+                return ValidationResponse::Invalid;
+            };
+            let Ok(token_hash) = BASE64_STANDARD.decode(token_iphash_b64) else {
+                debug!(user = %token.claims.sub, "Token iphash invalid base64");
+                return ValidationResponse::Invalid;
+            };
+            if token_hash.len() != 32 {
+                debug!(user = %token.claims.sub, "Token iphash wrong length");
+                return ValidationResponse::Invalid;
+            }
+            let current_hash = Sha256::digest(current_ip.to_string().as_bytes());
+            if !bool::from(token_hash.ct_eq(current_hash.as_slice())) {
+                debug!(user = %token.claims.sub, "Token IP hash does not match request IP");
+                return ValidationResponse::Invalid;
+            }
         }
         // double check expiration
         if Timestamp::from_secs(token.claims.exp) < Timestamp::now() {
