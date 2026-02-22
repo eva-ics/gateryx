@@ -3,7 +3,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use busrt::rpc::{Rpc as _, RpcClient};
+use busrt::{
+    Frame, QoS, async_trait,
+    client::AsyncClient as _,
+    rpc::{Rpc as _, RpcClient},
+};
+use eva_common::events::AAA_USER_TOPIC;
 use eva_sdk::prelude::{AccountingEvent, ClientAccounting as _};
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -11,7 +16,7 @@ use tokio::time::interval;
 use tracing::{error, info};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{Error, Result, util::GDuration};
+use crate::{Error, Result, storage::Storage, util::GDuration};
 
 fn default_eva_svc_id() -> String {
     "gateryx".to_string()
@@ -53,9 +58,35 @@ impl Default for Config {
     }
 }
 
+struct Handlers {
+    context: Context,
+}
+
+#[async_trait]
+impl busrt::rpc::RpcHandlers for Handlers {
+    async fn handle_frame(&self, frame: Frame) {
+        let Some(topic) = frame.topic() else {
+            return;
+        };
+        let Some(user) = topic.strip_prefix(AAA_USER_TOPIC) else {
+            return;
+        };
+        if let Err(e) = self.context.storage.invalidate(user).await {
+            error!(error = %e, user, "Failed to invalidate user");
+        }
+        if frame.payload().is_empty() {
+            // user deleted
+            if let Err(e) = self.context.storage.delete_passkey(user).await {
+                error!(error = %e, user, "Failed to delete passkeys for user");
+            }
+        }
+    }
+}
+
 struct EAPIBusInner {
     client: Mutex<Option<Arc<RpcClient>>>,
     config: Config,
+    context: Context,
 }
 
 impl EAPIBusInner {
@@ -73,14 +104,33 @@ impl EAPIBusInner {
         }
         let timeout = self.connect_timeout();
         let bus_config = busrt::ipc::Config::new(&self.config.bus.path, &self.config.id);
-        let bus = tokio::time::timeout(timeout, busrt::ipc::Client::connect(&bus_config))
+        let mut bus = tokio::time::timeout(timeout, busrt::ipc::Client::connect(&bus_config))
             .await
             .map_err(|_| Error::Timeout)?
             .map_err(|e| Error::failed(format!("EAPI bus connect failed: {e}")))?;
-        let rpc = Arc::new(busrt::rpc::RpcClient::new0(bus));
+        bus.subscribe(&format!("{}#", AAA_USER_TOPIC), QoS::Processed)
+            .await?;
+        let rpc = Arc::new(busrt::rpc::RpcClient::new(
+            bus,
+            Handlers {
+                context: self.context.clone(),
+            },
+        ));
         info!(bus_path = %self.config.bus.path, "Connected to EVA ICS bus");
         *guard = Some(Arc::clone(&rpc));
         Ok(rpc)
+    }
+}
+
+pub struct Context {
+    pub storage: Arc<dyn Storage>,
+}
+
+impl Clone for Context {
+    fn clone(&self) -> Self {
+        Self {
+            storage: Arc::clone(&self.storage),
+        }
     }
 }
 
@@ -92,10 +142,11 @@ pub struct EAPIBus {
 
 impl EAPIBus {
     /// Connect to the EVA ICS bus and create an EAPIBus; spawns a verification worker.
-    pub fn new(config: &Config) -> Arc<Self> {
+    pub fn new(config: &Config, context: Context) -> Arc<Self> {
         let inner = Arc::new(EAPIBusInner {
             client: Mutex::new(None),
             config: config.clone(),
+            context,
         });
         let inner_for_worker = Arc::clone(&inner);
         let worker_handle = tokio::spawn(async move {

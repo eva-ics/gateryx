@@ -750,7 +750,10 @@ async fn run_master_api_impl(
         context.admin_auth = Some(admin_auth);
     }
     if let Some(ref eapi_config) = config.eapi {
-        context.eapi_bus = Some(eapi::EAPIBus::new(eapi_config));
+        let eapi_context = eapi::Context {
+            storage: storage.clone(),
+        };
+        context.eapi_bus = Some(eapi::EAPIBus::new(eapi_config, eapi_context));
     }
     if let Some(ref auth_config) = config.auth {
         let auth_master_ctx = if matches!(
