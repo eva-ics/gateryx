@@ -91,9 +91,6 @@ async fn auth_file(mut request: Request<Full<Bytes>>, context: &Context) -> Byte
         .to_string()
         .trim_start_matches(URI_AUTH)
         .to_owned();
-    if path_contains_traversal(&relative_uri_str) {
-        return http_response(400, "Bad Request").await;
-    }
     *request.uri_mut() = Uri::try_from(relative_uri_str).unwrap();
     match auth_www_static.clone().serve(request).await {
         Ok(v) => {
@@ -397,6 +394,11 @@ async fn handle_http_request(
         synth_sleep().await;
         return Ok(http_response_forbidden().await);
     }
+    if path_contains_traversal(request.uri().path()) {
+        warn!(ip = %remote_ip, uri = %request.uri(), "Path contains traversal");
+        synth_sleep().await;
+        return Ok(http_response(400, "Bad Request").await);
+    }
     if let Some(ref extractor) = context.meta_extractor {
         let meta = extractor.extract(&request, remote_ip);
         if let Some(ref logger) = context.meta_logger {
@@ -588,6 +590,7 @@ async fn handle_http_request(
     request
         .headers_mut()
         .insert("host", authority.as_str().parse().unwrap());
+    // resolve path to absolute
     request.headers_mut().insert(
         "origin",
         format!("{}://{}", scheme, authority.as_str())
