@@ -126,16 +126,65 @@ pub fn resolve_host(request: &Request<Incoming>) -> Option<String> {
     None
 }
 
-/// Returns true if the path contains traversal after percent-decoding, so path can never escape the docroot.
+fn has_invalid_percent_encoding(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len()
+                || !bytes[i + 1].is_ascii_hexdigit()
+                || !bytes[i + 2].is_ascii_hexdigit()
+            {
+                return true;
+            }
+            i += 3;
+            continue;
+        }
+        i += 1;
+    }
+    false
+}
+
+fn decoded_path_for_security(path: &str) -> Option<String> {
+    if has_invalid_percent_encoding(path) {
+        return None;
+    }
+    let decoded = urlencoding::decode(path).ok()?;
+    Some(decoded.replace('\\', "/"))
+}
+
+/// Resolves `.` and `..` segments relative to root. Returns the normalized path (leading `/`) or `None` if traversal would escape root.
+pub fn normalize_path(path: &str) -> Option<String> {
+    let decoded = decoded_path_for_security(path)?;
+    let preserve_trailing_slash =
+        decoded.ends_with('/') || matches!(decoded.rsplit('/').next(), Some(".") | Some(".."));
+    let mut stack = Vec::new();
+    for segment in decoded.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                stack.pop()?;
+            }
+            _ => stack.push(urlencoding::encode(segment).into_owned()),
+        }
+    }
+    if stack.is_empty() {
+        return Some("/".to_string());
+    }
+    let mut normalized = format!("/{}", stack.join("/"));
+    if preserve_trailing_slash {
+        normalized.push('/');
+    }
+    Some(normalized)
+}
+
+/// Returns true if the path contains any traversal semantics after percent-decoding.
 #[inline]
 pub fn path_contains_traversal(path: &str) -> bool {
-    let Ok(decoded) = urlencoding::decode(path) else {
+    let Some(decoded) = decoded_path_for_security(path) else {
         return true;
     };
-    decoded.contains("/../")
-        || decoded.ends_with("/..")
-        || decoded.starts_with("../")
-        || decoded == ".."
+    decoded.split('/').any(|segment| segment == "..")
 }
 
 pub fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -437,5 +486,74 @@ impl AllowRemoteAny {
             return true;
         }
         self.0.iter().any(|net| net.contains(remote_ip))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_path, path_contains_traversal};
+
+    #[test]
+    fn normalize_path_root_and_simple() {
+        assert_eq!(normalize_path("/"), Some("/".into()));
+        assert_eq!(normalize_path("/foo"), Some("/foo".into()));
+        assert_eq!(normalize_path("/foo/bar"), Some("/foo/bar".into()));
+    }
+
+    #[test]
+    fn normalize_path_dot_and_dotdot() {
+        assert_eq!(normalize_path("/foo/./bar"), Some("/foo/bar".into()));
+        assert_eq!(normalize_path("/foo/../bar"), Some("/bar".into()));
+        assert_eq!(normalize_path("/foo/bar/.."), Some("/foo/".into()));
+        assert_eq!(normalize_path("/foo/bar/../.."), Some("/".into()));
+        assert_eq!(normalize_path("/.."), None);
+        assert_eq!(normalize_path("/foo/."), Some("/foo/".into()));
+        assert_eq!(normalize_path("/foo/"), Some("/foo/".into()));
+    }
+
+    #[test]
+    fn normalize_path_traversal_escape_root() {
+        assert_eq!(normalize_path(".."), None);
+        assert_eq!(normalize_path("../foo"), None);
+        assert_eq!(normalize_path("/foo/../../etc"), None);
+    }
+
+    #[test]
+    fn normalize_path_double_slash_and_empty_segments() {
+        assert_eq!(normalize_path("//"), Some("/".into()));
+        assert_eq!(normalize_path("/foo//bar"), Some("/foo/bar".into()));
+    }
+
+    #[test]
+    fn normalize_path_percent_encoded() {
+        assert_eq!(normalize_path("/f%2Fo%2Fo"), Some("/f/o/o".into()));
+        assert_eq!(normalize_path("/foo/%2e%2e/bar"), Some("/bar".into()));
+        assert_eq!(normalize_path("/foo/%2F..%2Fbar"), Some("/bar".into()));
+        assert_eq!(normalize_path("/%2e%2e/bar"), None);
+        assert_eq!(normalize_path("/foo/%20bar"), Some("/foo/%20bar".into()));
+        assert_eq!(normalize_path("/foo/%2e"), Some("/foo/".into()));
+        assert_eq!(normalize_path("/foo/%zz"), None);
+    }
+
+    #[test]
+    fn path_contains_traversal_blocks_escape() {
+        assert!(path_contains_traversal(".."));
+        assert!(path_contains_traversal("../foo"));
+        assert!(path_contains_traversal("/../foo"));
+        assert!(path_contains_traversal("/foo/../bar"));
+        assert!(path_contains_traversal("/foo/../.."));
+        assert!(path_contains_traversal("/foo/../../etc"));
+        assert!(path_contains_traversal("/foo/%2e%2e/bar"));
+        assert!(path_contains_traversal("/foo/%2F..%2Fbar"));
+        assert!(path_contains_traversal("/foo\\..\\bar"));
+        assert!(path_contains_traversal("/foo/%zz"));
+    }
+
+    #[test]
+    fn path_contains_traversal_allows_safe() {
+        assert!(!path_contains_traversal("/"));
+        assert!(!path_contains_traversal("/foo"));
+        assert!(!path_contains_traversal("/foo/bar"));
+        assert!(!path_contains_traversal("/foo/%20bar"));
     }
 }

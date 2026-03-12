@@ -53,7 +53,7 @@ use crate::{
     tokens,
     util::{
         self, AllowRemoteAny, downgrade_to_http11, http_internal_server_error, http_response,
-        http_response_forbidden, path_contains_traversal, resolve_host, synth_sleep,
+        http_response_forbidden, normalize_path, resolve_host, synth_sleep,
     },
     vapp::VirtualApp,
     ws,
@@ -394,10 +394,28 @@ async fn handle_http_request(
         synth_sleep().await;
         return Ok(http_response_forbidden().await);
     }
-    if path_contains_traversal(request.uri().path()) {
-        warn!(ip = %remote_ip, uri = %request.uri(), "Path contains traversal");
+    let path = request.uri().path();
+    let Some(normalized) = normalize_path(path) else {
+        warn!(ip = %remote_ip, uri = %request.uri(), "Path traversal would escape root");
         synth_sleep().await;
         return Ok(http_response(400, "Bad Request").await);
+    };
+    if normalized != path {
+        let pq = request
+            .uri()
+            .query()
+            .map_or_else(|| normalized.clone(), |q| format!("{}?{q}", normalized));
+        let Ok(path_and_query) = pq.parse::<PathAndQuery>() else {
+            warn!(ip = %remote_ip, uri = %request.uri(), normalized = %pq, "Failed to rebuild normalized request URI");
+            synth_sleep().await;
+            return Ok(http_response(400, "Bad Request").await);
+        };
+        let Ok(uri) = Uri::builder().path_and_query(path_and_query).build() else {
+            warn!(ip = %remote_ip, uri = %request.uri(), normalized = %pq, "Failed to build normalized request URI");
+            synth_sleep().await;
+            return Ok(http_response(400, "Bad Request").await);
+        };
+        *request.uri_mut() = uri;
     }
     if let Some(ref extractor) = context.meta_extractor {
         let meta = extractor.extract(&request, remote_ip);
