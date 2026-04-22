@@ -60,18 +60,18 @@ log = "0.4.27"
 mimalloc = { version = "0.1.48", features = ["secure"], optional = true }
 mini-moka = "0.10.3"
 native-tls = "0.2.14"
-openssl = "0.10.75"
+openssl = "0.10.78"
 p256 = { version = "0.13.2", features = ["jwk"] }
 parking_lot = "0.12.5"
 pbkdf2 = { version = "0.12.2", features = ["simple"] }
 pkcs8 = { version = "0.10.2", features = ["pem"] }
 prettytable-rs = "0.10.0"
-rand = "0.8"
+rand = "0.8.6"
 rcgen = { version = "0.14.6", features = ["zeroize"] }
 reqwest = { version = "0.12.24", features = ["json"], optional = true }
 rmp-serde = "1.3.1"
 rpassword = "7.4.0"
-rustls = { version = "0.23.35", features = ["ring"] }
+rustls = { version = "0.23.37", features = ["ring"] }
 serde = { version = "1.0.224", features = ["derive"] }
 serde_json = "1.0.145"
 sha2 = "0.10"
