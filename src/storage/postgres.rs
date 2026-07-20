@@ -102,35 +102,6 @@ impl super::Storage for Storage {
     async fn init(&self) -> Result<()> {
         sqlx::query(
             "
-            CREATE TABLE IF NOT EXISTS revoked_tokens (
-                login TEXT PRIMARY KEY,
-                not_before TIMESTAMPTZ NOT NULL,
-                keep_until TIMESTAMPTZ NOT NULL,
-                FOREIGN KEY (login) REFERENCES users(login) ON DELETE CASCADE
-            )
-            ",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // no foreign key for passkeys as they can exist without a user
-
-        sqlx::query(
-            "
-            CREATE TABLE IF NOT EXISTS passkeys (
-                login TEXT PRIMARY KEY,
-                cred_id BYTEA UNIQUE NOT NULL,
-                data TEXT NOT NULL,
-                created TIMESTAMPTZ NOT NULL,
-                last_used TIMESTAMPTZ NOT NULL,
-            )
-            ",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "
             CREATE TABLE IF NOT EXISTS users (
                 login TEXT PRIMARY KEY,
                 password_hash TEXT,
@@ -147,6 +118,38 @@ impl super::Storage for Storage {
             "
             CREATE TABLE IF NOT EXISTS groups (
                 name TEXT PRIMARY KEY
+            )
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "
+            CREATE TABLE IF NOT EXISTS revoked_tokens (
+                login TEXT PRIMARY KEY,
+                not_before TIMESTAMPTZ NOT NULL,
+                FOREIGN KEY (login) REFERENCES users(login) ON DELETE CASCADE
+            )
+            ",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Older untested PostgreSQL schemas had an unused NOT NULL keep_until column.
+        sqlx::query("ALTER TABLE revoked_tokens DROP COLUMN IF EXISTS keep_until")
+            .execute(&self.pool)
+            .await?;
+
+        // no foreign key for passkeys as they can exist without a user
+        sqlx::query(
+            "
+            CREATE TABLE IF NOT EXISTS passkeys (
+                login TEXT PRIMARY KEY,
+                cred_id BYTEA UNIQUE NOT NULL,
+                data TEXT NOT NULL,
+                created TIMESTAMPTZ NOT NULL,
+                last_used TIMESTAMPTZ NOT NULL
             )
             ",
         )
@@ -195,7 +198,7 @@ impl super::Storage for Storage {
         sqlx::query(
             "
             INSERT INTO revoked_tokens (login, not_before)
-            VALUES ($1, $2, $3)
+            VALUES ($1, $2)
             ON CONFLICT (login) DO UPDATE
             SET not_before = EXCLUDED.not_before
             ",
@@ -204,6 +207,7 @@ impl super::Storage for Storage {
         .bind(now)
         .execute(&self.pool)
         .await?;
+        self.revocation_cache.invalidate(&login.to_owned());
 
         Ok(())
     }

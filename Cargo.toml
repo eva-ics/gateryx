@@ -79,7 +79,7 @@ simple-pool = "0.0.18"
 subtle = "2.5"
 socketpair = "0.19.8"
 sqlite = { version = "0.37.0", default-features = false }
-sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite"], default-features=false }
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "postgres"], default-features=false }
 sqlx-sqlite = { version = "0.8.6", features = ["bundled"] }
 strum = { version = "0.27.2", features = ["derive"] }
 thiserror = "2.0.16"
