@@ -79,7 +79,7 @@ pub fn generate_test_x509_pair(cert_path: &Path, key_path: &Path) -> Result<()> 
         u8::try_from(now.month()).unwrap_or(1),
         u8::try_from(now.day()).unwrap_or(1),
     );
-    params.not_after = params.not_before + Duration::from_secs(3650 * 86_400); // 10 years
+    params.not_after = params.not_before + Duration::from_hours(87_600); // 10 years
 
     let key_pair = Zeroizing::new(KeyPair::generate().map_err(Error::crypto)?);
 

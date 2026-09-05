@@ -157,7 +157,7 @@ fn decoded_path_for_security(path: &str) -> Option<String> {
 pub fn normalize_path(path: &str) -> Option<String> {
     let decoded = decoded_path_for_security(path)?;
     let preserve_trailing_slash =
-        decoded.ends_with('/') || matches!(decoded.rsplit('/').next(), Some(".") | Some(".."));
+        decoded.ends_with('/') || matches!(decoded.rsplit('/').next(), Some("." | ".."));
     let mut stack = Vec::new();
     for segment in decoded.split('/') {
         match segment {

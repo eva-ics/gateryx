@@ -43,7 +43,7 @@ use crate::{
 
 use super::{AuthPayload, AuthResponse, ChangePasswordPayload, RpcEventExt, pack};
 
-const CLEANUP_WORKER_INTERVAL: Duration = Duration::from_secs(60);
+const CLEANUP_WORKER_INTERVAL: Duration = Duration::from_mins(1);
 
 struct Context {
     admin_auth: Option<admin::Auth>,

@@ -126,7 +126,7 @@ async fn run_gate(
     context_data.master_client = master_client;
     let context: worker::Context = context_data.into();
     let mut fut = Vec::new();
-    for (listener_config, listener) in listener_configs.iter().zip(listeners.into_iter()) {
+    for (listener_config, listener) in listener_configs.iter().zip(listeners) {
         let context = context.clone();
         let listener_config = listener_config.clone();
         fut.push(tokio::spawn({

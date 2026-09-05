@@ -19,7 +19,7 @@ use crate::{
     util::{GDuration, Numeric},
 };
 
-const CAPTCHA_TIMEOUT: Duration = Duration::from_secs(300);
+const CAPTCHA_TIMEOUT: Duration = Duration::from_mins(5);
 
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 #[serde(deny_unknown_fields)]
