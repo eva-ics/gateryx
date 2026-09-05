@@ -236,8 +236,8 @@ fn token_cookie_hmap(
     }
     let domain = context.token_domain_if_matches(host);
     let mut cookie_str = format!(
-        "{}={}; Path=/; SameSite=Lax; HttpOnly",
-        context.token_cookie_name, &**token_str
+        "{}={}; Path=/; SameSite=Lax; HttpOnly; Secure",
+        context.token_cookie_name, **token_str
     );
     if let Some(d) = domain {
         write!(cookie_str, "; Domain={}", d).ok()?;
