@@ -112,3 +112,7 @@ openssl-vendored = ["openssl/vendored"]
 
 [profile.release]
 strip = true
+
+[patch.crates-io]
+# RustCrypto upstream tag chacha20-v0.10.0; pinned to avoid the yanked crates.io source.
+chacha20 = { git = "https://github.com/RustCrypto/stream-ciphers.git", rev = "23f4f70aa6315207d1dc5b85de597091b92e420b" }
