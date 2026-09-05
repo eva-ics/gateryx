@@ -10,7 +10,7 @@ use std::{
 };
 
 use super::{AuthResult, Authenticator};
-use ldap3::{LdapConnAsync, SearchEntry};
+use ldap3::{LdapConnAsync, SearchEntry, dn_escape, ldap_escape};
 use native_tls::{Certificate, TlsConnector};
 use serde::Deserialize;
 use simple_pool::ResourcePool;
@@ -178,11 +178,11 @@ impl LdapPool {
         Ok(if user.contains('@') {
             format!(
                 "cn={},{}",
-                ldap.get_user_by_email(user).await?,
+                dn_escape(ldap.get_user_by_email(user).await?),
                 self.config.path
             )
         } else {
-            format!("cn={},{}", user, self.config.path)
+            format!("cn={},{}", dn_escape(user), self.config.path)
         })
     }
     async fn start_connector(&self) {
@@ -430,7 +430,7 @@ impl Ldap {
             .search(
                 "ou=users,dc=lab,dc=bma,dc=ai",
                 ldap3::Scope::Subtree,
-                &format!("(mail={})", email),
+                &format!("(mail={})", ldap_escape(email)),
                 vec!["cn"],
             )
             .await
