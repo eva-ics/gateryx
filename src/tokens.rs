@@ -14,14 +14,25 @@ use crate::{
 use base64::prelude::*;
 use bma_ts::Timestamp;
 use http::HeaderMap;
+use jsonwebtoken::jwk::EllipticCurveKeyParameters;
 use jsonwebtoken::{DecodingKey, EncodingKey};
-use p256::{PublicKey, ecdsa::SigningKey, elliptic_curve::JwkEcKey};
+use p256::{PublicKey, ecdsa::SigningKey, elliptic_curve::sec1::ToSec1Point as _};
 use pkcs8::{DecodePrivateKey as _, EncodePrivateKey as _, EncodePublicKey as _};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tracing::{debug, error, info, warn};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
+fn public_key_jwk(key: &PublicKey) -> EllipticCurveKeyParameters {
+    let point = key.to_sec1_point(false);
+    let bytes = point.as_bytes();
+    EllipticCurveKeyParameters {
+        x: BASE64_URL_SAFE_NO_PAD.encode(&bytes[1..33]),
+        y: BASE64_URL_SAFE_NO_PAD.encode(&bytes[33..65]),
+        ..Default::default()
+    }
+}
 
 fn ip_hash(ip: &IpAddr) -> String {
     BASE64_STANDARD.encode(Sha256::digest(ip.to_string().as_bytes()))
@@ -194,7 +205,7 @@ pub struct Jwks {
     iss: Option<String>,
     sub: Option<String>,
     iat: u64,
-    keys: Vec<JwkEcKey>,
+    keys: Vec<EllipticCurveKeyParameters>,
 }
 
 impl Public {
@@ -242,7 +253,7 @@ impl Factory {
                 iss: self.issuer_uri.clone(),
                 sub: self.issuer_uri.clone(),
                 iat: Timestamp::now().as_secs(),
-                keys: vec![self.public_key.to_jwk()],
+                keys: vec![public_key_jwk(&self.public_key)],
             },
         }
     }
@@ -413,5 +424,55 @@ impl Factory {
                 ValidationResponse::Invalid
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn generated_pkcs8_key_signs_tokens_verified_by_public_jwks() {
+        let key = generate_signing_key(None).await.unwrap();
+        let pem = key.to_pkcs8_pem(pkcs8::LineEnding::LF).unwrap();
+        let restored = SigningKey::from_pkcs8_pem(&pem).unwrap();
+        assert_eq!(key.to_bytes(), restored.to_bytes());
+        let public: PublicKey = restored.verifying_key().into();
+        let jwk = serde_json::to_value(public_key_jwk(&public)).unwrap();
+        assert_eq!(jwk["kty"], "EC");
+        assert_eq!(jwk["crv"], "P-256");
+        assert!(jwk.get("d").is_none());
+        assert_eq!(
+            BASE64_URL_SAFE_NO_PAD
+                .decode(jwk["x"].as_str().unwrap())
+                .unwrap()
+                .len(),
+            32
+        );
+        assert_eq!(
+            BASE64_URL_SAFE_NO_PAD
+                .decode(jwk["y"].as_str().unwrap())
+                .unwrap()
+                .len(),
+            32
+        );
+        let der = restored.to_pkcs8_der().unwrap();
+        let claims = serde_json::json!({"sub": "migration-test", "exp": 4_102_444_800_u64});
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256),
+            &claims,
+            &EncodingKey::from_ec_der(der.as_bytes()),
+        )
+        .unwrap();
+        let decoding =
+            DecodingKey::from_ec_components(jwk["x"].as_str().unwrap(), jwk["y"].as_str().unwrap())
+                .unwrap();
+        let decoded = jsonwebtoken::decode::<serde_json::Value>(
+            &token,
+            &decoding,
+            &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::ES256),
+        )
+        .unwrap();
+        assert_eq!(decoded.claims, claims);
     }
 }

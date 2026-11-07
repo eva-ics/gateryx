@@ -6,9 +6,8 @@ use std::{
 use chrono::{Datelike as _, Utc};
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, SanType};
 
-use p256::ecdsa::SigningKey;
+use p256::{ecdsa::SigningKey, elliptic_curve::Generate as _};
 use pkcs8::{EncodePrivateKey, LineEnding};
-use rand::SeedableRng as _;
 use tokio::{fs, io::AsyncWriteExt as _};
 use zeroize::Zeroizing;
 
@@ -50,8 +49,7 @@ pub fn generate_default_config(path: &Path) -> Result<()> {
 }
 
 pub async fn generate_signing_key(path: Option<&Path>) -> Result<SigningKey> {
-    let mut rng = rand::rngs::StdRng::from_entropy();
-    let key = SigningKey::random(&mut rng);
+    let key = SigningKey::try_generate().map_err(Error::crypto)?;
     if let Some(path) = path {
         let pkcs8 = Zeroizing::new(key.to_pkcs8_pem(LineEnding::LF).map_err(Error::crypto)?);
         write_secure(path, pkcs8.as_bytes()).await?;
